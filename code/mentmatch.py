@@ -83,7 +83,7 @@ def standardize_col_names(df):
         'who_is_your_direct_manager': 'manager', # Mentor's manager
         'in_which_time_zone_do_you_work_currently': 'time_zone',
         'how_many_years_have_you_been_with_amentum': 'years_with_amentum',
-        'please_select_the_competencies_you_feel_you_could_teach': 'competencies_offered',
+        'as_a_mentor_you_will_be_helping_a_mentee_develop_core_competencies_that_will_enable_them_to_become_future_leaders_within_the_organization_please_select_the_competencies_you_feel_you_could_teach_': 'competencies_offered',
         'how_many_mentees_are_you_able_to_mentor_throughout_the_program': 'mentor_capacity',
         'what_amentum_connect_networks_are_you_a_member_of': 'amentum_connection_networks', # Adjusted key slightly
         'would_you_prefer_to_be_matched_with_a_mentee_in_the_same_amentum_connection_networks_as_you': 'prefer_same_network_mentor',
