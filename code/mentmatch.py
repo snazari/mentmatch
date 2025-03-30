@@ -5,27 +5,27 @@ import numpy as np
 import re # For cleaning text
 
 # --- Configuration ---
-MENTEE_FILE_PATH = 'data/mentee_clean.xls' # <--- !!! UPDATE THIS PATH !!!
-MENTOR_FILE_PATH = 'data/mentor_clean.xls' # <--- !!! UPDATE THIS PATH !!!
+MENTEE_FILE_PATH = 'path/to/your/mentee_data.xlsx' # <--- !!! UPDATE THIS PATH !!!
+MENTOR_FILE_PATH = 'path/to/your/mentor_data.xlsx' # <--- !!! UPDATE THIS PATH !!!
 OUTPUT_FILE_PATH = 'mentor_mentee_matches.xlsx' # Path to save the results
 
-# Columns to use for semantic matching (adjust as needed)
-# Combine relevant free-text fields for a richer semantic profile
-MENTEE_SEMANTIC_COLS = [
-    'competencies you would like to work on with a mentor',
-    'Why are you interested in participating in the Mentoring Program?',
-    'What is your favorite activity/hobby?',
-    'What is your favorite movie genre?',
-    'What is your favorite book genre?',
-    'What is a fun fact about you?'
+# Define the TARGET standardized column names we expect to use after renaming
+# These correspond to the values in the .rename() dictionary keys used for semantic profiles
+MENTEE_TARGET_SEMANTIC_COLS = [
+    'competencies_desired',
+    'reason_for_participating',
+    'hobby',
+    'movie_genre',
+    'book_genre',
+    'fun_fact'
 ]
-MENTOR_SEMANTIC_COLS = [
-    'Please select the competencies you feel you could teach',
-    'Why are you interested in participating in the Mentoring Program?',
-    'What is your favorite activity/hobby?',
-    'What is your favorite movie genre?',
-    'What is your favorite book genre?',
-    'What is a fun fact about you?'
+MENTOR_TARGET_SEMANTIC_COLS = [
+    'competencies_offered',
+    'reason_for_participating',
+    'hobby',
+    'movie_genre',
+    'book_genre',
+    'fun_fact'
 ]
 
 # --- Helper Functions ---
@@ -42,38 +42,82 @@ def combine_text_fields(row, columns):
     """Combine text from specified columns into a single string."""
     combined = []
     for col in columns:
-        if col in row and pd.notna(row[col]):
+        # Check if the target column exists in the row's index (DataFrame columns)
+        if col in row.index and pd.notna(row[col]):
             combined.append(str(row[col]))
+        # Optional: Add a warning if a column is expected but missing for a row
+        # else:
+        #     print(f"Warning: Column '{col}' not found or is NaN for row index {row.name}")
     return ". ".join(combined)
+
 
 def standardize_col_names(df):
     """Standardize column names for easier access."""
-    df.columns = [re.sub(r'\s+', '_', col.lower().strip().replace('?','').replace(':','')) for col in df.columns]
-    # Manual renaming for known variations if necessary (example)
-    df = df.rename(columns={
+    # Step 1: Basic standardization (lowercase, underscore spaces, remove chars)
+    original_columns = df.columns.tolist()
+    # Remove common punctuation and symbols more broadly
+    standardized_columns = [re.sub(r'[?"\':()\[\];,./]', '', col.lower().strip()) for col in original_columns]
+    # Replace sequences of whitespace with a single underscore
+    standardized_columns = [re.sub(r'\s+', '_', col) for col in standardized_columns]
+    # Ensure no double underscores resulted
+    standardized_columns = [re.sub(r'_+', '_', col) for col in standardized_columns]
+    df.columns = standardized_columns
+
+    # --- DEBUGGING PRINT ---
+    print("\n--- Columns after initial standardization (before renaming): ---")
+    print(df.columns.tolist())
+    # --- END DEBUGGING PRINT ---
+
+    # Step 2: Manual renaming for known variations to TARGET names
+    # Keys should be the expected result AFTER the initial standardization above
+    # Values are the final names used in the script
+    rename_map = {
+        # Mentee specific
+        'competencies_you_would_like_to_work_on_with_a_mentor': 'competencies_desired',
+        'would_you_prefer_to_be_matched_with_a_mentor_in_the_same_amentum_connection_networks_as_you': 'prefer_same_network_mentee',
+        'do_you_consider_yourself_an_introvert_extrovert_or_a_mix_of_both': 'personality', # Mentee version
+        # Mentor specific
         'what_is_your_current_job_title': 'title',
         'select_your_occupation_category': 'category',
         'what_is_your_current_level_within_the_company': 'level',
-        'who_is_your_direct_manager': 'manager',
+        'who_is_your_direct_manager': 'manager', # Mentor's manager
         'in_which_time_zone_do_you_work_currently': 'time_zone',
         'how_many_years_have_you_been_with_amentum': 'years_with_amentum',
         'please_select_the_competencies_you_feel_you_could_teach': 'competencies_offered',
-        'competencies_you_would_like_to_work_on_with_a_mentor': 'competencies_desired',
-        'what_meeting_cadence_are_you_committed_to': 'meeting_cadence',
         'how_many_mentees_are_you_able_to_mentor_throughout_the_program': 'mentor_capacity',
-        'what_amentum_connect_network(s)_are_you_a_member_of': 'amentum_connection_networks',
-        'would_you_prefer_to_be_matched_with_a_mentor_in_the_same_amentum_connection_networks_as_you': 'prefer_same_network_mentee',
+        'what_amentum_connect_networks_are_you_a_member_of': 'amentum_connection_networks', # Adjusted key slightly
         'would_you_prefer_to_be_matched_with_a_mentee_in_the_same_amentum_connection_networks_as_you': 'prefer_same_network_mentor',
+        'do_you_consider_yourself_an_introvert_extrovert_or_a_mixter_of_both': 'personality', # Mentor version ('mixter')
+         # Common columns mapped to target names (keys adjusted based on standardization)
+        'name': 'name', # Ensure 'name' isn't accidentally renamed if present in map
+        'id': 'id',     # Ensure 'id' isn't accidentally renamed
+        'email': 'email', # Keep email if needed
+        'manager': 'manager', # Mentee's manager
+        'title': 'title', # Mentee's title
+        'level': 'level', # Mentee's level
+        'category': 'category', # Mentee's category
+        'time_zone': 'time_zone', # Mentee's time zone
+        'years_with_amentum': 'years_with_amentum', # Mentee's years
+        'what_meeting_cadence_are_you_committed_to': 'meeting_cadence',
+        'amentum_connection_networks': 'amentum_connection_networks', # Mentee's networks
         'why_are_you_interested_in_participating_in_the_mentoring_program': 'reason_for_participating',
         'did_you_previously_participate_in_an_amentum_or_jacobs_mentoring_program': 'previously_participated',
-        'what_is_your_favorite_activity/hobby': 'hobby',
+        'what_is_your_favorite_activityhobby': 'hobby', # Adjusted key based on likely standardization '/' removal
         'what_is_your_favorite_movie_genre': 'movie_genre',
         'what_is_your_favorite_book_genre': 'book_genre',
-        'do_you_consider_yourself_an_introvert_extrovert_or_a_mixter_of_both': 'personality', # Note: 'mixter' in original mentor q21
-        'do_you_consider_yourself_an_introvert_extrovert_or_a_mix_of_both': 'personality',
-        'what_is_your_top_"bucket_list"_item': 'bucket_list',
+        'what_is_your_top_bucket_list_item': 'bucket_list', # Adjusted key based on likely standardization
         'what_is_a_fun_fact_about_you': 'fun_fact'
-    })
+        # Add/modify mappings here if the debug print shows mismatches
+    }
+    # Only rename columns that actually exist to avoid errors
+    existing_cols_to_rename = {k: v for k, v in rename_map.items() if k in df.columns}
+    df = df.rename(columns=existing_cols_to_rename)
+
+    # --- DEBUGGING PRINT ---
+    print("\n--- Columns after final renaming: ---")
+    print(df.columns.tolist())
+    # --- END DEBUGGING PRINT ---
+
     return df
 
 # --- Main Script ---
@@ -81,6 +125,7 @@ def standardize_col_names(df):
 # 1. Load Data
 print("Loading data...")
 try:
+    # Specify sheet name if necessary, e.g., pd.read_excel(MENTEE_FILE_PATH, sheet_name='Sheet1')
     df_mentees = pd.read_excel(MENTEE_FILE_PATH)
     df_mentors = pd.read_excel(MENTOR_FILE_PATH)
     print(f"Loaded {len(df_mentees)} mentees and {len(df_mentors)} mentors.")
@@ -93,31 +138,42 @@ except Exception as e:
     exit()
 
 # 2. Preprocessing and Standardization
-print("Preprocessing data...")
-df_mentees = standardize_col_names(df_mentees)
-df_mentors = standardize_col_names(df_mentors)
+print("\nPreprocessing data...")
+# Use .copy() to avoid potential SettingWithCopyWarning later
+df_mentees = standardize_col_names(df_mentees.copy())
+df_mentors = standardize_col_names(df_mentors.copy())
 
-# Ensure essential columns exist
-required_mentee_cols = ['id', 'name', 'manager'] + [col.replace(' ', '_').lower() for col in MENTEE_SEMANTIC_COLS]
-required_mentor_cols = ['id', 'name', 'mentor_capacity'] + [col.replace(' ', '_').lower() for col in MENTOR_SEMANTIC_COLS]
+# Ensure essential TARGET columns exist AFTER standardization/renaming
+# Base required columns
+required_mentee_base = ['id', 'name', 'manager']
+required_mentor_base = ['id', 'name', 'mentor_capacity']
+
+# Combine base and target semantic columns for the check
+required_mentee_cols = list(set(required_mentee_base + MENTEE_TARGET_SEMANTIC_COLS))
+required_mentor_cols = list(set(required_mentor_base + MENTOR_TARGET_SEMANTIC_COLS))
 
 missing_mentee = [col for col in required_mentee_cols if col not in df_mentees.columns]
 missing_mentor = [col for col in required_mentor_cols if col not in df_mentors.columns]
 
 if missing_mentee:
-    print(f"Error: Missing required columns in Mentee data: {missing_mentee}")
+    print(f"\nError: Missing required TARGET columns in Mentee data after standardization/renaming: {missing_mentee}")
+    print("Compare this list with the 'Columns after final renaming' printout above.")
+    print("You may need to adjust the 'rename_map' in the 'standardize_col_names' function.")
+    print("Specifically, check the keys (left side) of the 'rename_map'. They should match the names")
+    print("shown in the 'Columns after initial standardization' printout for the columns you want to rename.")
     exit()
 if missing_mentor:
-    print(f"Error: Missing required columns in Mentor data: {missing_mentor}")
+    print(f"\nError: Missing required TARGET columns in Mentor data after standardization/renaming: {missing_mentor}")
+    print("Compare this list with the 'Columns after final renaming' printout above.")
+    print("You may need to adjust the 'rename_map' in the 'standardize_col_names' function.")
+    print("Specifically, check the keys (left side) of the 'rename_map'. They should match the names")
+    print("shown in the 'Columns after initial standardization' printout for the columns you want to rename.")
     exit()
 
-# Standardize semantic columns used in the combine function
-mentee_semantic_cols_std = [col.replace(' ', '_').lower() for col in MENTEE_SEMANTIC_COLS]
-mentor_semantic_cols_std = [col.replace(' ', '_').lower() for col in MENTOR_SEMANTIC_COLS]
-
-# Combine text fields for semantic analysis
-df_mentees['semantic_profile'] = df_mentees.apply(lambda row: combine_text_fields(row, mentee_semantic_cols_std), axis=1)
-df_mentors['semantic_profile'] = df_mentors.apply(lambda row: combine_text_fields(row, mentor_semantic_cols_std), axis=1)
+# Combine text fields for semantic analysis using TARGET columns
+print("\nCombining text fields for semantic profiles...")
+df_mentees['semantic_profile'] = df_mentees.apply(lambda row: combine_text_fields(row, MENTEE_TARGET_SEMANTIC_COLS), axis=1)
+df_mentors['semantic_profile'] = df_mentors.apply(lambda row: combine_text_fields(row, MENTOR_TARGET_SEMANTIC_COLS), axis=1)
 
 # Fill NaN capacity with a default (e.g., 1) or handle appropriately
 df_mentors['mentor_capacity'] = df_mentors['mentor_capacity'].fillna(1).astype(int)
@@ -126,10 +182,8 @@ df_mentors['mentor_capacity'] = df_mentors['mentor_capacity'].fillna(1).astype(i
 mentor_remaining_capacity = df_mentors.set_index('id')['mentor_capacity'].to_dict()
 
 # 3. Semantic Embeddings
-print("Generating semantic embeddings (this may take a while)...")
+print("\nGenerating semantic embeddings (this may take a while)...")
 # Load a pre-trained sentence transformer model
-# 'all-MiniLM-L6-v2' is a good balance of speed and performance
-# Other options: 'paraphrase-MiniLM-L6-v2', 'all-mpnet-base-v2' (better but slower)
 model = SentenceTransformer('all-MiniLM-L6-v2')
 
 mentee_embeddings = model.encode(df_mentees['semantic_profile'].tolist(), show_progress_bar=True)
@@ -137,29 +191,31 @@ mentor_embeddings = model.encode(df_mentors['semantic_profile'].tolist(), show_p
 print("Embeddings generated.")
 
 # 4. Matching Logic
-print("Calculating matches...")
+print("\nCalculating matches...")
 all_matches = []
 
 # Calculate cosine similarity between all mentees and mentors
 similarity_matrix = cosine_similarity(mentee_embeddings, mentor_embeddings)
 
-# Convert mentor IDs and names to lists/arrays for easy lookup
+# Convert mentor info to lists/arrays for easy lookup using TARGET names
 mentor_ids = df_mentors['id'].tolist()
 mentor_names = df_mentors['name'].tolist()
-mentor_managers = df_mentors.get('manager', pd.Series(index=df_mentors.index, name='manager')).tolist() # Handle potential missing manager col
-mentor_cadence = df_mentors.get('meeting_cadence', pd.Series(index=df_mentors.index, name='meeting_cadence')).tolist()
-mentor_networks = df_mentors.get('amentum_connection_networks', pd.Series(index=df_mentors.index, name='amentum_connection_networks')).tolist()
-mentor_prefer_same_network = df_mentors.get('prefer_same_network_mentor', pd.Series(index=df_mentors.index, name='prefer_same_network_mentor')).tolist()
+# Use .get(TARGET_COLUMN_NAME, default_series) for columns that might be optional or named differently
+default_series_mentor = pd.Series(index=df_mentors.index) # Empty series as default
+mentor_managers = df_mentors.get('manager', default_series_mentor).tolist()
+mentor_cadence = df_mentors.get('meeting_cadence', default_series_mentor).tolist()
+mentor_networks = df_mentors.get('amentum_connection_networks', default_series_mentor).tolist()
+mentor_prefer_same_network = df_mentors.get('prefer_same_network_mentor', default_series_mentor).tolist()
 
 
 for i, mentee in df_mentees.iterrows():
     mentee_id = mentee['id']
     mentee_name = mentee['name']
-    mentee_manager = mentee.get('manager', None) # Handle potential missing manager col
+    # Use .get(TARGET_COLUMN_NAME, default_value) for potentially missing columns per row
+    mentee_manager = mentee.get('manager', None)
     mentee_cadence = mentee.get('meeting_cadence', None)
     mentee_networks = mentee.get('amentum_connection_networks', None)
     mentee_prefer_same_network = mentee.get('prefer_same_network_mentee', None)
-
 
     # Get similarity scores for this mentee against all mentors
     scores = similarity_matrix[i]
@@ -176,39 +232,34 @@ for i, mentee in df_mentees.iterrows():
 
         # Constraint: Mentor must have capacity
         if mentor_cap <= 0:
-            # print(f"Skipping {mentor_name} for {mentee_name} (no capacity)")
-            continue # Skip this mentor if they have no capacity left
+            continue
 
-        # Constraint: Mentee cannot be mentored by their own manager (if manager info exists)
-        # This checks if the mentor IS the mentee's manager.
-        if mentee_manager is not None and pd.notna(mentee_manager) and mentor_name == mentee_manager:
-             # print(f"Skipping {mentor_name} for {mentee_name} (mentor is manager)")
-             continue # Skip if mentor is the mentee's direct manager
+        # Constraint: Mentee cannot be mentored by their own manager
+        # Ensure both mentee_manager and mentor_name are valid strings before comparing
+        if pd.notna(mentee_manager) and isinstance(mentor_name, str) and mentor_name == mentee_manager:
+             continue
 
-        # Constraint: Mentor cannot be the Mentee's manager's manager (Optional - add if needed)
-        # mentor_manager = mentor_managers[j]
-        # if mentee_manager is not None and mentor_manager is not None and pd.notna(mentee_manager) and pd.notna(mentor_manager) and mentee_manager == mentor_manager:
-        #     continue # Skip if mentor and mentee share the same manager
-
-        # Preference: Meeting Cadence (Exact match boost, adjust scoring as needed)
-        if mentee_cadence and mentor_cadence[j] and mentee_cadence == mentor_cadence[j]:
-            final_score += 0.1 # Add a bonus for matching cadence
+        # Preference: Meeting Cadence
+        # Ensure both cadences are valid strings before comparing
+        if pd.notna(mentee_cadence) and pd.notna(mentor_cadence[j]) and mentee_cadence == mentor_cadence[j]:
+            final_score += 0.1
 
         # Preference: Amentum Connection Networks
-        mentee_nets = set(str(mentee_networks).split(';')) if pd.notna(mentee_networks) else set()
-        mentor_nets = set(str(mentor_networks[j]).split(';')) if pd.notna(mentor_networks[j]) else set()
+        # Standardize processing of network strings (handle NaN, split by ';', strip whitespace)
+        mentee_nets_str = str(mentee_networks) if pd.notna(mentee_networks) else ''
+        mentor_nets_str = str(mentor_networks[j]) if pd.notna(mentor_networks[j]) else ''
+        mentee_nets = set(item.strip() for item in mentee_nets_str.split(';') if item.strip())
+        mentor_nets = set(item.strip() for item in mentor_nets_str.split(';') if item.strip())
         common_nets = mentee_nets.intersection(mentor_nets)
 
-        # Boost if both prefer same network and they share one
-        if common_nets:
-            if mentee_prefer_same_network == 'Yes' and mentor_prefer_same_network[j] == 'Yes':
-                final_score += 0.15 # Strong boost
-            elif mentee_prefer_same_network == 'Yes' or mentor_prefer_same_network[j] == 'Yes':
-                 final_score += 0.05 # Smaller boost if only one prefers it
+        mentee_pref = str(mentee_prefer_same_network).lower() == 'yes'
+        mentor_pref = str(mentor_prefer_same_network[j]).lower() == 'yes'
 
-        # --- Add other potential factors ---
-        # Example: Level difference (prefer mentor higher level) - Requires 'level' column standardization
-        # Example: Competency keyword matching (in addition to semantic)
+        if common_nets:
+            if mentee_pref and mentor_pref:
+                final_score += 0.15 # Strong boost
+            elif mentee_pref or mentor_pref:
+                 final_score += 0.05 # Smaller boost
 
         mentor_scores.append({
             'mentor_id': mentor_id,
@@ -235,32 +286,18 @@ for i, mentee in df_mentees.iterrows():
 
     all_matches.append(mentee_matches)
 
-    # --- Simple Allocation (Optional - First Best Match) ---
-    # This is a basic greedy allocation. More sophisticated methods exist (e.g., Stable Matching).
-    # If you uncomment this, it will assign the top available mentor and decrement capacity.
-    # allocated = False
-    # for match in sorted_mentors:
-    #     mentor_id_to_assign = match['mentor_id']
-    #     if mentor_remaining_capacity.get(mentor_id_to_assign, 0) > 0:
-    #         print(f"Assigning {mentee_name} to {match['mentor_name']}")
-    #         mentor_remaining_capacity[mentor_id_to_assign] -= 1
-    #         # Add assignment details to a separate list/df if needed
-    #         allocated = True
-    #         break
-    # if not allocated and sorted_mentors:
-    #     print(f"Could not assign {mentee_name} - no suitable mentors with capacity found.")
-    # elif not sorted_mentors:
-    #      print(f"Could not assign {mentee_name} - no suitable mentors found after filtering.")
-
+    # Optional Allocation Logic (remains commented out) ...
 
 # 5. Output Results
-print("Saving results...")
+print("\nSaving results...")
 df_results = pd.DataFrame(all_matches)
 
 # Reorder columns for clarity
 cols_order = ['mentee_id', 'mentee_name']
 for k in range(1, top_n + 1):
-    cols_order.extend([f'match_{k}_mentor_id', f'match_{k}_mentor_name', f'match_{k}_score', f'match_{k}_semantic_similarity'])
+    # Check if match columns exist before adding to order
+    if f'match_{k}_mentor_id' in df_results.columns:
+        cols_order.extend([f'match_{k}_mentor_id', f'match_{k}_mentor_name', f'match_{k}_score', f'match_{k}_semantic_similarity'])
 # Ensure only existing columns are included in the final order
 df_results = df_results[[col for col in cols_order if col in df_results.columns]]
 
@@ -270,4 +307,4 @@ try:
 except Exception as e:
     print(f"Error saving results to Excel: {e}")
 
-print("Script finished.")
+print("\nScript finished.")
