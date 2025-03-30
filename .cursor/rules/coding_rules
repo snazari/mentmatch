@@ -1,0 +1,49 @@
+# Coding Pattern Preferences
+- Always prefer simple solutions over complex ones
+- Always prefer readability over performance
+- Always prefer code that is easy to maintain over code that is easy to write
+- Always prefer code that is easy to understand over code that is easy to implement
+- Avoid duplicate code
+- Avoid code that is hard to maintain
+- Avoid code that is hard to understand
+- Avoid code that is hard to implement
+- Avoid code that is hard to test
+- Avoid code that is hard to debug
+- always check other areas of the codebase that might already have similar code and functionality
+- always check if the code is already implemented in other areas of the codebase
+- always check if the code is already implemented in other areas of the codebase
+- always check if the code is already implemented in other areas of the codebase
+- always check if the code is already implemented in other areas of the codebase
+- always check if the code is already implemented in other areas of the codebase
+- write code that takes into account the future maintainability of the codebase
+- write code that takes into account the future scalability of the codebase
+- write code that takes into account the future performance of the codebase
+- write code that takes into account the future readability of the codebase
+- write code that takes into account the future understandability of the codebase
+- write code that takes into account the future implementability of the codebase    
+- write code that takes into account the different environments where the code will be run: development, testing, production, etc.
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options - and if you do, make sure to document it and make sure you remove the old pattern before you commit the changes  
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options - and if you do, make sure to document it and make sure you remove the old pattern before you commit the changes  
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options - and if you do, make sure to document it and make sure you remove the old pattern before you commit the changes  
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options - and if you do, make sure to document it and make sure you remove the old pattern before you commit the changes  
+- when fixing an issue or bug, do not introduce a new pattern of technology without first exhasting all other options - and if you do, make sure to document it and make sure you remove the old pattern before you commit the changes  
+
+
+
+
+## Naming Conventions
+- Use `snake_case` for variables and function names
+- Use `PascalCase` for class names
+- Use `UPPER_CASE` for constants
+
+## Formatting
+- Use 4 spaces for indentation (not tabs)
+- Maximum line length: 88 characters
+- Use blank lines to separate logical sections
+- Use docstrings for all functions, classes, and modules
+    
