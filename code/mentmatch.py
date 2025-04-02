@@ -5,9 +5,9 @@ import numpy as np
 import re # For cleaning text
 
 # --- Configuration ---
-MENTEE_FILE_PATH = '../data/mentee_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
-MENTOR_FILE_PATH = '../data/mentor_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
-OUTPUT_FILE_PATH = '../mentor_mentee_matches_test.xlsx' # Path to save the results
+MENTEE_FILE_PATH = '../data/mentee_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
+MENTOR_FILE_PATH = '../data/mentor_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
+OUTPUT_FILE_PATH = '../mentor_mentee_matches_20250402.xlsx' # Path to save the results
 
 # Define the TARGET standardized column names we expect to use after renaming
 # These correspond to the values in the .rename() dictionary keys used for semantic profiles
@@ -261,7 +261,7 @@ for i, mentee in df_mentees.iterrows():
         final_score = score
         match_reasons = []
         match_reasons.append(f"Semantic similarity: {score:.2f}")
-        
+
         # Skip if mentor capacity is exhausted or mentor is mentee's manager
         if mentor_cap <= 0: continue
         if pd.notna(mentee_manager) and isinstance(mentor_name, str) and mentor_name == mentee_manager: continue
@@ -281,28 +281,28 @@ for i, mentee in df_mentees.iterrows():
         mentee_pref = str(mentee_prefer_same_network).lower() == 'yes'
         mentor_pref = str(mentor_prefer_same_network[j]).lower() == 'yes'
         if common_nets:
-            if mentee_pref and mentor_pref: 
+            if mentee_pref and mentor_pref:
                 final_score += 0.15
                 match_reasons.append(f"Both prefer same network: {', '.join(common_nets)}")
-            elif mentee_pref or mentor_pref: 
+            elif mentee_pref or mentor_pref:
                 final_score += 0.05
                 match_reasons.append(f"One prefers same network: {', '.join(common_nets)}")
             else:
                 match_reasons.append(f"Common networks: {', '.join(common_nets)}")
-        
+
         # Competency match (add to summary)
         mentee_competencies = str(mentee.get('competencies_desired', ''))
         mentor_competencies = str(df_mentors.iloc[j].get('competencies_offered', ''))
         if mentee_competencies and mentor_competencies:
             match_reasons.append(f"Competency match: mentee seeks {mentee_competencies.strip()}, mentor offers {mentor_competencies.strip()}")
-        
+
         # Other match factors - add shared interests
         for interest_field in ['hobby', 'movie_genre', 'book_genre']:
             mentee_interest = str(mentee.get(interest_field, ''))
             mentor_interest = str(df_mentors.iloc[j].get(interest_field, ''))
             if mentee_interest and mentor_interest and mentee_interest.lower() == mentor_interest.lower():
                 match_reasons.append(f"Shared {interest_field.replace('_', ' ')}: {mentee_interest}")
-        
+
         # Create a concise match summary
         match_summary = "; ".join(match_reasons)
 
@@ -332,9 +332,9 @@ cols_order = ['mentee_id', 'mentee_name']
 for k in range(1, top_n + 1):
     if f'match_{k}_mentor_id' in df_results.columns:
         cols_order.extend([
-            f'match_{k}_mentor_id', 
-            f'match_{k}_mentor_name', 
-            f'match_{k}_score', 
+            f'match_{k}_mentor_id',
+            f'match_{k}_mentor_name',
+            f'match_{k}_score',
             f'match_{k}_semantic_similarity',
             f'match_{k}_summary'
         ])
