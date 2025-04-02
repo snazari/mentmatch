@@ -5,8 +5,8 @@ import numpy as np
 import re # For cleaning text
 
 # --- Configuration ---
-MENTEE_FILE_PATH = './data/mentee_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
-MENTOR_FILE_PATH = './data/mentor_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
+MENTEE_FILE_PATH = './data/mentee_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
+MENTOR_FILE_PATH = './data/mentor_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
 OUTPUT_FILE_PATH = 'mentor_mentee_matches.xlsx' # Path to save the results
 
 # Define the TARGET standardized column names we expect to use after renaming
@@ -159,7 +159,7 @@ df_mentees['semantic_profile'] = df_mentees.apply(lambda row: combine_text_field
 df_mentors['semantic_profile'] = df_mentors.apply(lambda row: combine_text_fields(row, MENTOR_TARGET_SEMANTIC_COLS), axis=1)
 
 
-# --- Data Cleaning for Mentor Capacity --- <<<< NEW/MODIFIED SECTION
+# --- Data Cleaning for Mentor Capacity ---
 print("\nCleaning mentor capacity data...")
 if 'mentor_capacity' in df_mentors.columns:
     # Define mapping for common text numbers (add more if needed)
