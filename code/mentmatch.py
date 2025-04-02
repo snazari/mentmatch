@@ -238,6 +238,9 @@ mentor_cadence = df_mentors.get('meeting_cadence', default_series_mentor).tolist
 mentor_networks = df_mentors.get('amentum_connection_networks', default_series_mentor).tolist()
 mentor_prefer_same_network = df_mentors.get('prefer_same_network_mentor', default_series_mentor).tolist()
 
+# Store additional data for match summary
+mentor_df_index = {id: idx for idx, id in enumerate(mentor_ids)}
+
 
 for i, mentee in df_mentees.iterrows():
     mentee_id = mentee['id']
@@ -256,6 +259,10 @@ for i, mentee in df_mentees.iterrows():
 
         # --- Apply Matching Constraints and Preferences ---
         final_score = score
+        match_reasons = []
+        match_reasons.append(f"Semantic similarity: {score:.2f}")
+        
+        # Skip if mentor capacity is exhausted or mentor is mentee's manager
         if mentor_cap <= 0: continue
         if pd.notna(mentee_manager) and isinstance(mentor_name, str) and mentor_name == mentee_manager: continue
 
@@ -263,6 +270,7 @@ for i, mentee in df_mentees.iterrows():
         mentor_cad = mentor_cadence[j]
         if pd.notna(mentee_cadence) and pd.notna(mentor_cad) and mentee_cadence == mentor_cad:
             final_score += 0.1
+            match_reasons.append(f"Meeting cadence match: {mentor_cad}")
 
         # Network Preference
         mentee_nets_str = str(mentee_networks) if pd.notna(mentee_networks) else ''
@@ -273,12 +281,35 @@ for i, mentee in df_mentees.iterrows():
         mentee_pref = str(mentee_prefer_same_network).lower() == 'yes'
         mentor_pref = str(mentor_prefer_same_network[j]).lower() == 'yes'
         if common_nets:
-            if mentee_pref and mentor_pref: final_score += 0.15
-            elif mentee_pref or mentor_pref: final_score += 0.05
+            if mentee_pref and mentor_pref: 
+                final_score += 0.15
+                match_reasons.append(f"Both prefer same network: {', '.join(common_nets)}")
+            elif mentee_pref or mentor_pref: 
+                final_score += 0.05
+                match_reasons.append(f"One prefers same network: {', '.join(common_nets)}")
+            else:
+                match_reasons.append(f"Common networks: {', '.join(common_nets)}")
+        
+        # Competency match (add to summary)
+        mentee_competencies = str(mentee.get('competencies_desired', ''))
+        mentor_competencies = str(df_mentors.iloc[j].get('competencies_offered', ''))
+        if mentee_competencies and mentor_competencies:
+            match_reasons.append(f"Competency match: mentee seeks {mentee_competencies.strip()}, mentor offers {mentor_competencies.strip()}")
+        
+        # Other match factors - add shared interests
+        for interest_field in ['hobby', 'movie_genre', 'book_genre']:
+            mentee_interest = str(mentee.get(interest_field, ''))
+            mentor_interest = str(df_mentors.iloc[j].get(interest_field, ''))
+            if mentee_interest and mentor_interest and mentee_interest.lower() == mentor_interest.lower():
+                match_reasons.append(f"Shared {interest_field.replace('_', ' ')}: {mentee_interest}")
+        
+        # Create a concise match summary
+        match_summary = "; ".join(match_reasons)
 
         mentor_scores.append({
             'mentor_id': mentor_id, 'mentor_name': mentor_name,
-            'semantic_similarity': score, 'final_score': final_score
+            'semantic_similarity': score, 'final_score': final_score,
+            'match_summary': match_summary
         })
 
     # Sort and store top N matches
@@ -291,6 +322,7 @@ for i, mentee in df_mentees.iterrows():
         mentee_matches[f'match_{k+1}_mentor_name'] = match['mentor_name']
         mentee_matches[f'match_{k+1}_score'] = round(match['final_score'], 4)
         mentee_matches[f'match_{k+1}_semantic_similarity'] = round(match['semantic_similarity'], 4)
+        mentee_matches[f'match_{k+1}_summary'] = match['match_summary']
     all_matches.append(mentee_matches)
 
 # 5. Output Results
@@ -299,7 +331,13 @@ df_results = pd.DataFrame(all_matches)
 cols_order = ['mentee_id', 'mentee_name']
 for k in range(1, top_n + 1):
     if f'match_{k}_mentor_id' in df_results.columns:
-        cols_order.extend([f'match_{k}_mentor_id', f'match_{k}_mentor_name', f'match_{k}_score', f'match_{k}_semantic_similarity'])
+        cols_order.extend([
+            f'match_{k}_mentor_id', 
+            f'match_{k}_mentor_name', 
+            f'match_{k}_score', 
+            f'match_{k}_semantic_similarity',
+            f'match_{k}_summary'
+        ])
 df_results = df_results[[col for col in cols_order if col in df_results.columns]]
 
 try:
