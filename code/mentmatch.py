@@ -5,9 +5,9 @@ import numpy as np
 import re # For cleaning text
 
 # --- Configuration ---
-MENTEE_FILE_PATH = './data/mentee_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
-MENTOR_FILE_PATH = './data/mentor_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
-OUTPUT_FILE_PATH = 'mentor_mentee_matches.xlsx' # Path to save the results
+MENTEE_FILE_PATH = '../data/mentee_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
+MENTOR_FILE_PATH = '../data/mentor_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
+OUTPUT_FILE_PATH = '../mentor_mentee_matches_test.xlsx' # Path to save the results
 
 # Define the TARGET standardized column names we expect to use after renaming
 # These correspond to the values in the .rename() dictionary keys used for semantic profiles
