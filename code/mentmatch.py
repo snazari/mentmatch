@@ -5,8 +5,8 @@ import numpy as np
 import re # For cleaning text
 
 # --- Configuration ---
-MENTEE_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/data/mentee_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
-MENTOR_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/data/mentor_test.xlsx' # <--- !!! UPDATE THIS PATH !!!
+MENTEE_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/data/mentee_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
+MENTOR_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/data/mentor_clean_v2.xlsx' # <--- !!! UPDATE THIS PATH !!!
 OUTPUT_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/mentor_mentee_matches_20250415.xlsx' # Path to save the results
 
 # Define the TARGET standardized column names we expect to use after renaming
