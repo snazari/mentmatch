@@ -3,14 +3,37 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import re # For cleaning text
+import argparse
 
 # --- Configuration ---
-MENTEE_FILE_PATH = './data/mentee_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
-MENTOR_FILE_PATH = './data/mentor_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
-OUTPUT_FILE_PATH = 'mentor_mentee_matches.xlsx' # Path to save the results
+MENTEE_FILE_PATH = None
+MENTOR_FILE_PATH = None
+OUTPUT_FILE_PATH = None
+
+# --- Argument Parser ---
+def parse_arguments():
+    parser = argparse.ArgumentParser(description="Match mentees and mentors based on semantic similarity.")
+    parser.add_argument(
+        '--mentee_file',
+        type=str,
+        default='./data/mentee_clean.xlsx',
+        help='Path to the mentee input Excel file.'
+    )
+    parser.add_argument(
+        '--mentor_file',
+        type=str,
+        default='./data/mentor_clean.xlsx',
+        help='Path to the mentor input Excel file.'
+    )
+    parser.add_argument(
+        '--output_file',
+        type=str,
+        default='mentor_mentee_matches.xlsx',
+        help='Path to save the output matches Excel file.'
+    )
+    return parser.parse_args()
 
 # Define the TARGET standardized column names we expect to use after renaming
-# These correspond to the values in the .rename() dictionary keys used for semantic profiles
 MENTEE_TARGET_SEMANTIC_COLS = [
     'competencies_desired',
     'reason_for_participating',
@@ -78,7 +101,7 @@ def standardize_col_names(df):
         'in_which_time_zone_do_you_work_currently': 'time_zone',
         'how_many_years_have_you_been_with_amentum': 'years_with_amentum',
         # Use the exact name from Mentor's "initial standardization" printout
-        'as_a_mentor_you_will_be_helping_a_mentee_develop_core_competencies_that_will_enable_them_to_become_future_leaders_within_the_organization_please_select_the_competencies_you_feel_you_could_teach_': 'competencies_offered', # Adjusted based on user output
+        'as_a_mentor_please_select_the_competencies_you_feel_you_could_teach': 'competencies_offered',
         'how_many_mentees_are_you_able_to_mentor_throughout_the_program': 'mentor_capacity',
         'what_amentum_connect_networks_are_you_a_member_of': 'amentum_connection_networks',
          # Handle specific mentor variation if different from mentee's standardized name
@@ -115,6 +138,12 @@ def standardize_col_names(df):
     return df
 
 # --- Main Script ---
+
+# 0. Parse Arguments
+args = parse_arguments()
+MENTEE_FILE_PATH = args.mentee_file
+MENTOR_FILE_PATH = args.mentor_file
+OUTPUT_FILE_PATH = args.output_file
 
 # 1. Load Data
 print("Loading data...")
@@ -294,17 +323,16 @@ for i, mentee in df_mentees.iterrows():
     all_matches.append(mentee_matches)
 
 # 5. Output Results
-print("\nSaving results...")
-df_results = pd.DataFrame(all_matches)
-cols_order = ['mentee_id', 'mentee_name']
-for k in range(1, top_n + 1):
-    if f'match_{k}_mentor_id' in df_results.columns:
-        cols_order.extend([f'match_{k}_mentor_id', f'match_{k}_mentor_name', f'match_{k}_score', f'match_{k}_semantic_similarity'])
-df_results = df_results[[col for col in cols_order if col in df_results.columns]]
-
+print(f"\nSaving results to {OUTPUT_FILE_PATH}...")
 try:
+    df_results = pd.DataFrame(all_matches)
+    cols_order = ['mentee_id', 'mentee_name']
+    for k in range(1, top_n + 1):
+        if f'match_{k}_mentor_id' in df_results.columns:
+            cols_order.extend([f'match_{k}_mentor_id', f'match_{k}_mentor_name', f'match_{k}_score', f'match_{k}_semantic_similarity'])
+    df_results = df_results[[col for col in cols_order if col in df_results.columns]]
     df_results.to_excel(OUTPUT_FILE_PATH, index=False)
-    print(f"Matching suggestions saved to '{OUTPUT_FILE_PATH}'")
+    print(f"Successfully saved matches to {OUTPUT_FILE_PATH}")
 except Exception as e:
     print(f"Error saving results to Excel: {e}")
 
