@@ -5,28 +5,27 @@ import numpy as np
 import re # For cleaning text
 
 # --- Configuration ---
-MENTEE_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/data/mentee_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
-MENTOR_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/data/mentor_clean_v2.xlsx' # <--- !!! UPDATE THIS PATH !!!
-OUTPUT_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/mentor_mentee_matches_20250415.xlsx' # Path to save the results
+MENTEE_FILE_PATH = '~/sandbox/mentmatch/data/mentee_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
+MENTOR_FILE_PATH = '~/sandbox/mentmatch/data/mentor_clean_v2.xlsx' # <--- !!! UPDATE THIS PATH !!!
+OUTPUT_FILE_PATH = '~/sandbox/mentmatch/mentor_mentee_matches_20250427_new_weighted.xlsx' # Path to save the results
+
+# --- NEW: Define columns for Career vs Social Profiles ---
+# Adjust these lists based on the final standardized column names
+# Ensure these columns actually exist after standardization
+CAREER_COLS_MENTEE = ['competencies_desired', 'title', 'category', 'level']
+SOCIAL_COLS_MENTEE = ['reason_for_participating', 'hobby', 'movie_genre', 'book_genre', 'fun_fact']
+CAREER_COLS_MENTOR = ['competencies_offered', 'title', 'category', 'level']
+SOCIAL_COLS_MENTOR = ['reason_for_participating', 'hobby', 'movie_genre', 'book_genre', 'fun_fact']
+
+# --- NEW: Define Weights for Career vs Social Score ---
+CAREER_WEIGHT = 0.7
+SOCIAL_WEIGHT = 0.3
 
 # Define the TARGET standardized column names we expect to use after renaming
 # These correspond to the values in the .rename() dictionary keys used for semantic profiles
-MENTEE_TARGET_SEMANTIC_COLS = [
-    'competencies_desired',
-    'reason_for_participating',
-    'hobby',
-    'movie_genre',
-    'book_genre',
-    'fun_fact'
-]
-MENTOR_TARGET_SEMANTIC_COLS = [
-    'competencies_offered',
-    'reason_for_participating',
-    'hobby',
-    'movie_genre',
-    'book_genre',
-    'fun_fact'
-]
+# Combine career and social for checking required columns
+MENTEE_TARGET_SEMANTIC_COLS = list(set(CAREER_COLS_MENTEE + SOCIAL_COLS_MENTEE))
+MENTOR_TARGET_SEMANTIC_COLS = list(set(CAREER_COLS_MENTOR + SOCIAL_COLS_MENTOR))
 
 # --- Helper Functions ---
 
@@ -155,8 +154,13 @@ if missing_mentor:
 
 # Combine text fields for semantic analysis using TARGET columns
 print("\nCombining text fields for semantic profiles...")
-df_mentees['semantic_profile'] = df_mentees.apply(lambda row: combine_text_fields(row, MENTEE_TARGET_SEMANTIC_COLS), axis=1)
-df_mentors['semantic_profile'] = df_mentors.apply(lambda row: combine_text_fields(row, MENTOR_TARGET_SEMANTIC_COLS), axis=1)
+# Create separate profiles
+print(" - Generating Career Profiles")
+df_mentees['career_profile'] = df_mentees.apply(lambda row: combine_text_fields(row, CAREER_COLS_MENTEE), axis=1)
+df_mentors['career_profile'] = df_mentors.apply(lambda row: combine_text_fields(row, CAREER_COLS_MENTOR), axis=1)
+print(" - Generating Social Profiles")
+df_mentees['social_profile'] = df_mentees.apply(lambda row: combine_text_fields(row, SOCIAL_COLS_MENTEE), axis=1)
+df_mentors['social_profile'] = df_mentors.apply(lambda row: combine_text_fields(row, SOCIAL_COLS_MENTOR), axis=1)
 
 
 # --- Data Cleaning for Mentor Capacity ---
@@ -204,14 +208,15 @@ else:
 
 
 # Keep track of remaining mentor capacity using the correct index ('id')
+# Create a mutable copy for decrementing during assignment
 if 'id' in df_mentors.columns:
     if df_mentors['id'].is_unique:
-        mentor_remaining_capacity = df_mentors.set_index('id')['mentor_capacity'].to_dict()
+        mentor_capacity_map = df_mentors.set_index('id')['mentor_capacity'].to_dict()
     else:
         # Handle duplicate mentor IDs if necessary (as before)
         print("Warning: Duplicate mentor IDs found. Using capacity from the first occurrence of each ID.")
         mentor_capacity_series = df_mentors.drop_duplicates(subset=['id']).set_index('id')['mentor_capacity']
-        mentor_remaining_capacity = mentor_capacity_series.to_dict()
+        mentor_capacity_map = mentor_capacity_series.to_dict()
 else:
     print("Error: 'id' column not found in mentor data after renaming. Cannot track capacity.")
     exit()
@@ -220,27 +225,42 @@ else:
 # 3. Semantic Embeddings
 print("\nGenerating semantic embeddings (this may take a while)...")
 model = SentenceTransformer('all-MiniLM-L6-v2')
-mentee_embeddings = model.encode(df_mentees['semantic_profile'].tolist(), show_progress_bar=True)
-mentor_embeddings = model.encode(df_mentors['semantic_profile'].tolist(), show_progress_bar=True)
+# Generate Career Embeddings
+print(" - Encoding Career Profiles...")
+mentee_career_embeddings = model.encode(df_mentees['career_profile'].tolist(), show_progress_bar=True)
+mentor_career_embeddings = model.encode(df_mentors['career_profile'].tolist(), show_progress_bar=True)
+# Generate Social Embeddings
+print(" - Encoding Social Profiles...")
+mentee_social_embeddings = model.encode(df_mentees['social_profile'].tolist(), show_progress_bar=True)
+mentor_social_embeddings = model.encode(df_mentors['social_profile'].tolist(), show_progress_bar=True)
+
+# Drop profile columns to save memory if needed
+# df_mentees = df_mentees.drop(columns=['career_profile', 'social_profile'])
+# df_mentors = df_mentors.drop(columns=['career_profile', 'social_profile'])
+
 print("Embeddings generated.")
 
-# 4. Matching Logic
-print("\nCalculating matches...")
-all_matches = []
-similarity_matrix = cosine_similarity(mentee_embeddings, mentor_embeddings)
+# 4. Matching Logic - Greedy Assignment with Weighted Score
+print("\nCalculating all potential matches and weighted scores...")
+# Calculate separate similarity matrices
+career_similarity_matrix = cosine_similarity(mentee_career_embeddings, mentor_career_embeddings)
+social_similarity_matrix = cosine_similarity(mentee_social_embeddings, mentor_social_embeddings)
 
-# Convert mentor info to lists/arrays
+# Convert mentor info to lists/arrays for faster lookup during score calculation
 mentor_ids = df_mentors['id'].tolist()
 mentor_names = df_mentors['name'].tolist()
-default_series_mentor = pd.Series(index=df_mentors.index)
+default_series_mentor = pd.Series(index=df_mentors.index) # Empty series for safe .get()
 mentor_managers = df_mentors.get('manager', default_series_mentor).tolist()
 mentor_cadence = df_mentors.get('meeting_cadence', default_series_mentor).tolist()
 mentor_networks = df_mentors.get('amentum_connection_networks', default_series_mentor).tolist()
 mentor_prefer_same_network = df_mentors.get('prefer_same_network_mentor', default_series_mentor).tolist()
+mentor_competencies_offered = df_mentors.get('competencies_offered', default_series_mentor).tolist()
+mentor_hobbies = df_mentors.get('hobby', default_series_mentor).tolist()
+mentor_movie_genres = df_mentors.get('movie_genre', default_series_mentor).tolist()
+mentor_book_genres = df_mentors.get('book_genre', default_series_mentor).tolist()
 
-# Store additional data for match summary
-mentor_df_index = {id: idx for idx, id in enumerate(mentor_ids)}
 
+potential_assignments = []
 
 for i, mentee in df_mentees.iterrows():
     mentee_id = mentee['id']
@@ -249,22 +269,34 @@ for i, mentee in df_mentees.iterrows():
     mentee_cadence = mentee.get('meeting_cadence', None)
     mentee_networks = mentee.get('amentum_connection_networks', None)
     mentee_prefer_same_network = mentee.get('prefer_same_network_mentee', None)
+    mentee_competencies = str(mentee.get('competencies_desired', ''))
+    mentee_hobby = str(mentee.get('hobby', ''))
+    mentee_movie_genre = str(mentee.get('movie_genre', ''))
+    mentee_book_genre = str(mentee.get('book_genre', ''))
 
-    scores = similarity_matrix[i]
-    mentor_scores = []
-    for j, score in enumerate(scores):
-        mentor_id = mentor_ids[j]
+    # Get career and social similarity scores for this mentee against all mentors
+    mentee_career_scores = career_similarity_matrix[i]
+    mentee_social_scores = social_similarity_matrix[i]
+    
+    # Iterate through mentors to calculate combined scores
+    for j, mentor_id in enumerate(mentor_ids): # Use enumerate over mentor_ids for index j
+        # mentor_id = mentor_ids[j] # Already got mentor_id from enumerate
         mentor_name = mentor_names[j]
-        mentor_cap = mentor_remaining_capacity.get(mentor_id, 0) # Use tracking dict
 
-        # --- Apply Matching Constraints and Preferences ---
-        final_score = score
+        # --- Initial Check: Skip if mentor is mentee's manager ---
+        if pd.notna(mentee_manager) and isinstance(mentor_name, str) and mentor_name == mentee_manager:
+            continue
+
+        # --- Calculate Weighted Semantic Score ---
+        career_score = mentee_career_scores[j]
+        social_score = mentee_social_scores[j]
+        weighted_semantic_score = (CAREER_WEIGHT * career_score) + (SOCIAL_WEIGHT * social_score)
+
+        # --- Calculate Final Score with Adjustments ---
+        final_score = weighted_semantic_score # Start with weighted semantic score
         match_reasons = []
-        match_reasons.append(f"Semantic similarity: {score:.2f}")
-
-        # Skip if mentor capacity is exhausted or mentor is mentee's manager
-        if mentor_cap <= 0: continue
-        if pd.notna(mentee_manager) and isinstance(mentor_name, str) and mentor_name == mentee_manager: continue
+        # Add breakdown of semantic scores to reasons
+        match_reasons.append(f"Weighted Semantic: {weighted_semantic_score:.2f} (Career: {career_score:.2f}, Social: {social_score:.2f})")
 
         # Cadence Preference
         mentor_cad = mentor_cadence[j]
@@ -291,58 +323,136 @@ for i, mentee in df_mentees.iterrows():
                 match_reasons.append(f"Common networks: {', '.join(common_nets)}")
 
         # Competency match (add to summary)
-        mentee_competencies = str(mentee.get('competencies_desired', ''))
-        mentor_competencies = str(df_mentors.iloc[j].get('competencies_offered', ''))
+        mentor_competencies = str(mentor_competencies_offered[j])
         if mentee_competencies and mentor_competencies:
-            match_reasons.append(f"Competency match: mentee seeks {mentee_competencies.strip()}, mentor offers {mentor_competencies.strip()}")
+            match_reasons.append(f"Competency match: mentee seeks '{mentee_competencies.strip()}', mentor offers '{mentor_competencies.strip()}'")
 
         # Other match factors - add shared interests
-        for interest_field in ['hobby', 'movie_genre', 'book_genre']:
-            mentee_interest = str(mentee.get(interest_field, ''))
-            mentor_interest = str(df_mentors.iloc[j].get(interest_field, ''))
-            if mentee_interest and mentor_interest and mentee_interest.lower() == mentor_interest.lower():
-                match_reasons.append(f"Shared {interest_field.replace('_', ' ')}: {mentee_interest}")
+        mentor_hobby = str(mentor_hobbies[j])
+        if mentee_hobby and mentor_hobby and mentee_hobby.lower() == mentor_hobby.lower():
+            match_reasons.append(f"Shared hobby: {mentee_hobby}")
+        mentor_movie = str(mentor_movie_genres[j])
+        if mentee_movie_genre and mentor_movie and mentee_movie_genre.lower() == mentor_movie.lower():
+             match_reasons.append(f"Shared movie genre: {mentee_movie_genre}")
+        mentor_book = str(mentor_book_genres[j])
+        if mentee_book_genre and mentor_book and mentee_book_genre.lower() == mentor_book.lower():
+             match_reasons.append(f"Shared book genre: {mentee_book_genre}")
 
         # Create a concise match summary
         match_summary = "; ".join(match_reasons)
 
-        mentor_scores.append({
-            'mentor_id': mentor_id, 'mentor_name': mentor_name,
-            'semantic_similarity': score, 'final_score': final_score,
+        potential_assignments.append({
+            'mentee_idx': i,
+            'mentor_idx': j,
+            'mentee_id': mentee_id,
+            'mentor_id': mentor_id,
+            'mentee_name': mentee_name,
+            'mentor_name': mentor_name,
+            # Store individual scores for potential analysis
+            'career_similarity': career_score,
+            'social_similarity': social_score,
+            'weighted_semantic_score': weighted_semantic_score,
+            'final_score': final_score,
             'match_summary': match_summary
         })
 
-    # Sort and store top N matches
-    sorted_mentors = sorted(mentor_scores, key=lambda x: x['final_score'], reverse=True)
-    top_n = 5
-    mentee_matches = {'mentee_id': mentee_id, 'mentee_name': mentee_name}
-    for k in range(min(top_n, len(sorted_mentors))):
-        match = sorted_mentors[k]
-        mentee_matches[f'match_{k+1}_mentor_id'] = match['mentor_id']
-        mentee_matches[f'match_{k+1}_mentor_name'] = match['mentor_name']
-        mentee_matches[f'match_{k+1}_score'] = round(match['final_score'], 4)
-        mentee_matches[f'match_{k+1}_semantic_similarity'] = round(match['semantic_similarity'], 4)
-        mentee_matches[f'match_{k+1}_summary'] = match['match_summary']
-    all_matches.append(mentee_matches)
+# Sort all potential assignments by final score, descending
+potential_assignments.sort(key=lambda x: x['final_score'], reverse=True)
+print(f"Calculated {len(potential_assignments)} potential assignments.")
+
+# Perform greedy assignment
+print("\nPerforming greedy assignment...")
+final_matches = []
+assigned_mentees = set() # Keep track of mentees who have been assigned
+
+# Use the mentor_capacity_map which will be decremented
+current_mentor_capacity = mentor_capacity_map.copy()
+
+for assignment in potential_assignments:
+    mentee_id = assignment['mentee_id']
+    mentor_id = assignment['mentor_id']
+
+    # Check if mentee is already assigned OR if mentor has capacity
+    if mentee_id not in assigned_mentees and current_mentor_capacity.get(mentor_id, 0) > 0:
+        # Assign this match
+        final_matches.append({
+            'mentee_id': mentee_id,
+            'mentee_name': assignment['mentee_name'],
+            'assigned_mentor_id': mentor_id,
+            'assigned_mentor_name': assignment['mentor_name'],
+            'match_score': round(assignment['final_score'], 4),
+            # Include separate scores in output
+            'career_similarity': round(assignment['career_similarity'], 4),
+            'social_similarity': round(assignment['social_similarity'], 4),
+            'weighted_semantic_score': round(assignment['weighted_semantic_score'], 4),
+            'match_summary': assignment['match_summary']
+        })
+
+        # Update tracking
+        assigned_mentees.add(mentee_id)
+        current_mentor_capacity[mentor_id] -= 1
+
+print(f"Assigned {len(final_matches)} mentees.")
+
+# Check for unassigned mentees
+unassigned_mentee_ids = set(df_mentees['id']) - assigned_mentees
+if unassigned_mentee_ids:
+    print(f"Warning: {len(unassigned_mentee_ids)} mentees could not be assigned (likely due to mentor capacity constraints).")
+    
+    # --- NEW: Save unassigned mentees to a separate file ---
+    print("\nSaving list of unassigned mentees...")
+    try:
+        # Define the path for the unassigned mentees file
+        unassigned_file_path = OUTPUT_FILE_PATH.replace('.xlsx', '_unassigned.xlsx')
+        
+        # Filter the original mentee DataFrame
+        df_unassigned = df_mentees[df_mentees['id'].isin(unassigned_mentee_ids)].copy()
+        
+        # Select relevant columns to save (adjust as needed)
+        unassigned_cols = ['id', 'name', 'email', 'manager', 'title', 'level', 'category'] # Basic info
+        # Add profile columns if they weren't dropped earlier
+        if 'career_profile' in df_unassigned.columns:
+             unassigned_cols.append('career_profile')
+        if 'social_profile' in df_unassigned.columns:
+             unassigned_cols.append('social_profile')
+        # Add original semantic columns used for matching
+        unassigned_cols.extend([col for col in MENTEE_TARGET_SEMANTIC_COLS if col in df_unassigned.columns])
+        
+        # Keep only existing columns from the desired list
+        df_unassigned_output = df_unassigned[[col for col in unassigned_cols if col in df_unassigned.columns]]
+        
+        df_unassigned_output.to_excel(unassigned_file_path, index=False)
+        print(f"Unassigned mentees saved to '{unassigned_file_path}'")
+    except Exception as e:
+        print(f"Error saving unassigned mentees list: {e}")
+    # --- END NEW SECTION ---
+    
+    # Optionally, list them or save to a separate file
 
 # 5. Output Results
 print("\nSaving results...")
-df_results = pd.DataFrame(all_matches)
-cols_order = ['mentee_id', 'mentee_name']
-for k in range(1, top_n + 1):
-    if f'match_{k}_mentor_id' in df_results.columns:
-        cols_order.extend([
-            f'match_{k}_mentor_id',
-            f'match_{k}_mentor_name',
-            f'match_{k}_score',
-            f'match_{k}_semantic_similarity',
-            f'match_{k}_summary'
-        ])
+df_results = pd.DataFrame(final_matches)
+
+# Define the order of columns for the output file
+cols_order = [
+    'mentee_id',
+    'mentee_name',
+    'assigned_mentor_id',
+    'assigned_mentor_name',
+    'match_score',
+    # Add new score columns to output
+    'weighted_semantic_score',
+    'career_similarity',
+    'social_similarity',
+    'match_summary'
+]
+
+# Ensure all columns exist before reordering (should exist based on creation)
 df_results = df_results[[col for col in cols_order if col in df_results.columns]]
 
 try:
     df_results.to_excel(OUTPUT_FILE_PATH, index=False)
-    print(f"Matching suggestions saved to '{OUTPUT_FILE_PATH}'")
+    print(f"Final assignments saved to '{OUTPUT_FILE_PATH}'")
 except Exception as e:
     print(f"Error saving results to Excel: {e}")
 

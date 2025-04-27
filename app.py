@@ -4,11 +4,14 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 import os
+import re
 
 st.set_page_config(page_title="MentMatch Visualizer", layout="wide")
 
 # --- Constants ---
 DEFAULT_MATCHES_FILE = 'mentor_mentee_matches_20250403.xlsx'  # Default file path
+MENTOR_DATA_FILE = 'data/mentor_clean_v2.xlsx' # Path to original mentor data
+MENTEE_DATA_FILE = 'data/mentee_clean.xlsx'   # Path to original mentee data
 
 # --- Title and Description ---
 st.title("MentMatch Visualizer")
@@ -32,229 +35,926 @@ else:
     st.warning("Please upload a matches file to continue")
     st.stop()
 
+# --- NEW: Load Original Mentor Data (Optional) ---
+df_mentors_orig = None
+try:
+    # Standardize column names function (copy from mentmatch.py or define here)
+    # Assuming mentmatch.py functions are not directly importable
+    def standardize_col_names_simple(df):
+        cols = df.columns
+        cols = [re.sub(r'[?"\':()\[\];,./]', '', col.lower().strip()) for col in cols]
+        cols = [re.sub(r'\s+', '_', col) for col in cols]
+        cols = [re.sub(r'_+', '_', col) for col in cols]
+        df.columns = cols
+        # Return the standardized df for further processing
+        return df
+
+    # Add a basic text-to-numeric conversion for capacity here if needed
+    def clean_capacity(cap_str):
+        cap_str = str(cap_str).lower().strip()
+        num_map = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5, 
+                   'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10}
+        if cap_str in num_map:
+            return num_map[cap_str]
+        try:
+            return int(cap_str)
+        except ValueError:
+            return 1 # Default capacity if conversion fails
+
+    if os.path.exists(MENTOR_DATA_FILE):
+        df_mentors_orig_raw = pd.read_excel(MENTOR_DATA_FILE)
+        # 1. Standardize column names
+        df_mentors_orig = standardize_col_names_simple(df_mentors_orig_raw.copy())
+        
+        # 2. Define and apply specific renames AFTER standardization
+        mentor_rename_map = {
+            'id': 'mentor_id',  # Standardized 'id' -> 'mentor_id'
+            'name': 'mentor_name', # Standardized 'name' -> 'mentor_name'
+            'how_many_mentees_are_you_able_to_mentor_throughout_the_program': 'mentor_capacity',
+            # Add other necessary renames for attributes used later (e.g., category, level)
+            'select_your_occupation_category': 'mentor_category',
+            'what_is_your_current_level_within_the_company': 'mentor_level'
+        }
+        cols_to_rename_mentor = {k: v for k, v in mentor_rename_map.items() if k in df_mentors_orig.columns}
+        df_mentors_orig = df_mentors_orig.rename(columns=cols_to_rename_mentor)
+        
+        # 3. Clean capacity
+        if 'mentor_capacity' in df_mentors_orig.columns:
+             df_mentors_orig['mentor_capacity_numeric'] = df_mentors_orig['mentor_capacity'].apply(clean_capacity)
+             st.info(f"Successfully loaded original mentor data from {MENTOR_DATA_FILE}")
+        else:
+             st.warning(f"Could not find 'mentor_capacity' column in {MENTOR_DATA_FILE} after standardization/renaming.")
+             df_mentors_orig = None # Don't use if capacity is missing
+        
+        # Ensure essential columns exist
+        if df_mentors_orig is not None and ('mentor_id' not in df_mentors_orig.columns or 'mentor_name' not in df_mentors_orig.columns):
+             st.error(f"Failed to standardize 'mentor_id' or 'mentor_name' in {MENTOR_DATA_FILE}.")
+             df_mentors_orig = None
+
+    else:
+        st.info(f"Original mentor data file not found at {MENTOR_DATA_FILE}. Mentor analysis will be limited.")
+except Exception as e:
+    st.warning(f"Error loading or processing original mentor data from {MENTOR_DATA_FILE}: {e}")
+    df_mentors_orig = None
+# --- END NEW ---
+
+# --- NEW: Load Original Mentee Data (Optional) ---
+df_mentees_orig = None
+try:
+    # Reuse the simple standardization function
+    if os.path.exists(MENTEE_DATA_FILE):
+        df_mentees_orig_raw = pd.read_excel(MENTEE_DATA_FILE)
+        # Apply standardization
+        df_mentees_orig = standardize_col_names_simple(df_mentees_orig_raw.copy())
+        
+        # Define and apply specific renames AFTER standardization
+        mentee_rename_map = {
+            'id': 'mentee_id', # Standardized 'id' -> 'mentee_id'
+            'name': 'mentee_name', # Standardized 'name' -> 'mentee_name'
+            # Add other necessary renames for attributes
+            'select_your_occupation_category': 'mentee_category',
+            'what_is_your_current_level_within_the_company': 'mentee_level',
+            'years_with_amentum': 'mentee_years_with_amentum' # Keep original name for now, convert later
+        }
+        cols_to_rename_mentee = {k: v for k, v in mentee_rename_map.items() if k in df_mentees_orig.columns}
+        df_mentees_orig = df_mentees_orig.rename(columns=cols_to_rename_mentee)
+        
+        # Convert years_with_amentum to numeric if it exists (using the renamed col)
+        if 'mentee_years_with_amentum' in df_mentees_orig.columns:
+            df_mentees_orig['mentee_years_with_amentum_numeric'] = pd.to_numeric(df_mentees_orig['mentee_years_with_amentum'], errors='coerce')
+        
+        # Ensure essential columns exist
+        if 'mentee_id' not in df_mentees_orig.columns or 'mentee_name' not in df_mentees_orig.columns:
+             st.error(f"Failed to standardize 'mentee_id' or 'mentee_name' in {MENTEE_DATA_FILE}.")
+             df_mentees_orig = None # Prevent use if key IDs are missing
+        else:
+             st.info(f"Successfully loaded original mentee data from {MENTEE_DATA_FILE}")
+
+    else:
+        st.info(f"Original mentee data file not found at {MENTEE_DATA_FILE}. Attribute analysis will be limited.")
+except Exception as e:
+    st.warning(f"Error loading or processing original mentee data from {MENTEE_DATA_FILE}: {e}")
+    df_mentees_orig = None
+# --- END NEW ---
+
 # --- Process Data ---
 if matches_df is not None:
-    # Extract column names to identify how many matches per mentee
-    match_cols = [col for col in matches_df.columns if 'match_' in col and 'mentor_id' in col]
-    num_matches = len(match_cols)
+    # Detect format based on column names
+    is_new_format = 'assigned_mentor_id' in matches_df.columns
+    if is_new_format:
+        st.info("Detected new single-assignment format.")
+        num_matches = 1  # Only one match per mentee in new format
+    else:
+        st.info("Detected old multi-match format.")
+        match_cols = [col for col in matches_df.columns if 'match_' in col and 'mentor_id' in col]
+        num_matches = len(match_cols)
     
     # Create tabs for different visualizations
-    tab1, tab2, tab3 = st.tabs(["Match Overview", "Detailed Matches", "Network Analysis"])
+    # Add new tab for Mentor Analysis
+    tab_titles = ["Match Overview", "Detailed Matches", "Network Analysis"]
+    if is_new_format:
+        tab_titles.append("Mentor Analysis") # Add tab only for new format
+        # Add Attribute Analysis tab if original data is available
+        if df_mentees_orig is not None and df_mentors_orig is not None:
+            tab_titles.append("Attribute Analysis")
+        
+    tabs = st.tabs(tab_titles)
+    tab_map = {title: tab for title, tab in zip(tab_titles, tabs)}
     
-    with tab1:
-        st.header("Match Overview")
-        
-        # Create a summary of match scores
-        match_data = []
-        for i in range(1, num_matches + 1):
-            score_col = f"match_{i}_score"
-            if score_col in matches_df.columns:
-                match_data.append({
-                    "Match Number": f"Match {i}",
-                    "Average Score": matches_df[score_col].mean(),
-                    "Min Score": matches_df[score_col].min(),
-                    "Max Score": matches_df[score_col].max()
-                })
-        
-        if match_data:
-            match_summary = pd.DataFrame(match_data)
-            
-            # Create bar chart of average scores
-            fig = px.bar(match_summary, x="Match Number", y="Average Score",
-                         error_y=match_summary["Max Score"]-match_summary["Average Score"],
-                         error_y_minus=match_summary["Average Score"]-match_summary["Min Score"],
-                         title="Match Quality by Preference Order",
-                         height=400)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Display summary table
-            st.dataframe(match_summary, use_container_width=True)
-        
-        # Distribution of semantic similarity scores
-        st.subheader("Distribution of Semantic Similarity Scores")
-        
-        similarity_data = []
-        for i in range(1, num_matches + 1):
-            sim_col = f"match_{i}_semantic_similarity"
-            if sim_col in matches_df.columns:
-                match_scores = matches_df[sim_col].dropna()
-                for score in match_scores:
-                    similarity_data.append({
-                        "Match Number": f"Match {i}",
-                        "Semantic Similarity": score
-                    })
-        
-        if similarity_data:
-            similarity_df = pd.DataFrame(similarity_data)
-            fig = px.histogram(similarity_df, x="Semantic Similarity", color="Match Number",
-                              marginal="box", opacity=0.7, nbins=20,
-                              title="Distribution of Semantic Similarity Scores",
-                              height=500)
-            st.plotly_chart(fig, use_container_width=True)
+    # Assign tabs dynamically
+    tab1 = tab_map["Match Overview"]
+    tab2 = tab_map["Detailed Matches"]
+    tab3 = tab_map["Network Analysis"]
+    tab4 = tab_map.get("Mentor Analysis") # Will be None if not created
+    tab5 = tab_map.get("Attribute Analysis") # Will be None if not created
     
-    with tab2:
-        st.header("Detailed Matches")
-        
-        # Mentee selector
-        mentee_names = matches_df["mentee_name"].tolist()
-        selected_mentee = st.selectbox("Select Mentee", mentee_names)
-        
-        # Display matches for selected mentee
-        if selected_mentee:
-            mentee_row = matches_df[matches_df["mentee_name"] == selected_mentee].iloc[0]
-            mentee_id = mentee_row["mentee_id"]
+    def display_multi_match_format(df, num_matches):
+        with tab1:
+            st.header("Match Overview")
             
-            st.subheader(f"Matches for {selected_mentee} (ID: {mentee_id})")
-            
-            # Create table of matches
-            matches_table_data = []
+            # Create a summary of match scores
+            match_data = []
             for i in range(1, num_matches + 1):
-                mentor_name_col = f"match_{i}_mentor_name"
-                mentor_id_col = f"match_{i}_mentor_id"
                 score_col = f"match_{i}_score"
-                sim_col = f"match_{i}_semantic_similarity"
-                summary_col = f"match_{i}_summary"
-                
-                if all(col in mentee_row.index for col in [mentor_name_col, score_col, sim_col, summary_col]):
-                    matches_table_data.append({
-                        "Rank": i,
-                        "Mentor Name": mentee_row[mentor_name_col],
-                        "Mentor ID": mentee_row[mentor_id_col] if mentor_id_col in mentee_row.index else "N/A",
-                        "Match Score": mentee_row[score_col],
-                        "Semantic Similarity": mentee_row[sim_col],
-                        "Match Summary": mentee_row[summary_col] if summary_col in mentee_row.index else ""
+                if score_col in df.columns:
+                    match_data.append({
+                        "Match Number": f"Match {i}",
+                        "Average Score": df[score_col].mean(),
+                        "Min Score": df[score_col].min(),
+                        "Max Score": df[score_col].max()
                     })
             
-            if matches_table_data:
-                matches_table = pd.DataFrame(matches_table_data)
-                st.dataframe(matches_table, use_container_width=True)
+            if match_data:
+                match_summary = pd.DataFrame(match_data)
                 
-                # Bar chart of match scores
-                fig = px.bar(matches_table, x="Rank", y=["Match Score", "Semantic Similarity"],
-                             barmode="group", height=400,
-                             title=f"Match Scores for {selected_mentee}")
+                # Create bar chart of average scores
+                fig = px.bar(match_summary, x="Match Number", y="Average Score",
+                             error_y=match_summary["Max Score"]-match_summary["Average Score"],
+                             error_y_minus=match_summary["Average Score"]-match_summary["Min Score"],
+                             title="Match Quality by Preference Order",
+                             height=400)
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Display match summaries in expanders
-                st.subheader("Match Details")
-                for i, match in enumerate(matches_table_data):
-                    with st.expander(f"Match {i+1}: {match['Mentor Name']} (Score: {match['Match Score']:.4f})"):
+                # Display summary table
+                st.dataframe(match_summary, use_container_width=True)
+            
+            # Distribution of semantic similarity scores
+            st.subheader("Distribution of Semantic Similarity Scores")
+            
+            similarity_data = []
+            for i in range(1, num_matches + 1):
+                sim_col = f"match_{i}_semantic_similarity"
+                if sim_col in df.columns:
+                    match_scores = df[sim_col].dropna()
+                    for score in match_scores:
+                        similarity_data.append({
+                            "Match Number": f"Match {i}",
+                            "Semantic Similarity": score
+                        })
+            
+            if similarity_data:
+                similarity_df = pd.DataFrame(similarity_data)
+                fig = px.histogram(similarity_df, x="Semantic Similarity", color="Match Number",
+                                  marginal="box", opacity=0.7, nbins=20,
+                                  title="Distribution of Semantic Similarity Scores",
+                                  height=500)
+                st.plotly_chart(fig, use_container_width=True)
+        
+        with tab2:
+            st.header("Detailed Matches")
+            
+            # Mentee selector
+            mentee_names = df["mentee_name"].tolist()
+            selected_mentee = st.selectbox("Select Mentee", mentee_names)
+            
+            # Display matches for selected mentee
+            if selected_mentee:
+                mentee_row = df[df["mentee_name"] == selected_mentee].iloc[0]
+                mentee_id = mentee_row["mentee_id"]
+                
+                st.subheader(f"Matches for {selected_mentee} (ID: {mentee_id})")
+                
+                # Create table of matches
+                matches_table_data = []
+                for i in range(1, num_matches + 1):
+                    mentor_name_col = f"match_{i}_mentor_name"
+                    mentor_id_col = f"match_{i}_mentor_id"
+                    score_col = f"match_{i}_score"
+                    sim_col = f"match_{i}_semantic_similarity"
+                    summary_col = f"match_{i}_summary"
+                    
+                    if all(col in mentee_row.index for col in [mentor_name_col, score_col, sim_col, summary_col]):
+                        matches_table_data.append({
+                            "Rank": i,
+                            "Mentor Name": mentee_row[mentor_name_col],
+                            "Mentor ID": mentee_row[mentor_id_col] if mentor_id_col in mentee_row.index else "N/A",
+                            "Match Score": mentee_row[score_col],
+                            "Semantic Similarity": mentee_row[sim_col],
+                            "Match Summary": mentee_row[summary_col] if summary_col in mentee_row.index else ""
+                        })
+                
+                if matches_table_data:
+                    matches_table = pd.DataFrame(matches_table_data)
+                    st.dataframe(matches_table, use_container_width=True)
+                    
+                    # Bar chart of match scores
+                    fig = px.bar(matches_table, x="Rank", y=["Match Score", "Semantic Similarity"],
+                                 barmode="group", height=400,
+                                 title=f"Match Scores for {selected_mentee}")
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Display match summaries in expanders
+                    st.subheader("Match Details")
+                    for i, match in enumerate(matches_table_data):
+                        with st.expander(f"Match {i+1}: {match['Mentor Name']} (Score: {match['Match Score']:.4f})"):
+                            st.write(f"**Mentor ID:** {match['Mentor ID']}")
+                            st.write(f"**Match Score:** {match['Match Score']:.4f}")
+                            st.write(f"**Semantic Similarity:** {match['Semantic Similarity']:.4f}")
+                            st.write("**Match Summary:**")
+                            
+                            # Split the summary by semicolons for better readability
+                            summary_points = match['Match Summary'].split(';')
+                            for point in summary_points:
+                                if point.strip():
+                                    st.write(f"- {point.strip()}")
+        
+        with tab3:
+            st.header("Network Analysis")
+            
+            # Extract unique mentors from all matches
+            all_mentors = set()
+            for i in range(1, num_matches + 1):
+                mentor_col = f"match_{i}_mentor_name"
+                if mentor_col in df.columns:
+                    mentors = df[mentor_col].dropna().unique()
+                    all_mentors.update(mentors)
+            
+            st.subheader("Mentor Match Frequency")
+            
+            # Count how many times each mentor appears in the top matches
+            mentor_counts = {}
+            for mentor in all_mentors:
+                count = 0
+                for i in range(1, num_matches + 1):
+                    mentor_col = f"match_{i}_mentor_name"
+                    if mentor_col in df.columns:
+                        count += (df[mentor_col] == mentor).sum()
+                mentor_counts[mentor] = count
+            
+            # Create a dataframe and sort by count
+            mentor_freq = pd.DataFrame({
+                "Mentor Name": list(mentor_counts.keys()),
+                "Match Count": list(mentor_counts.values())
+            })
+            mentor_freq = mentor_freq.sort_values("Match Count", ascending=False)
+            
+            # Display as horizontal bar chart for better readability with many mentors
+            if len(mentor_freq) > 0:
+                fig = px.bar(mentor_freq.head(20), y="Mentor Name", x="Match Count", 
+                             orientation='h', height=600,
+                             title="Top 20 Mentors by Match Frequency")
+                fig.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Display full table
+                st.dataframe(mentor_freq, use_container_width=True)
+                
+                # Network diagram option for smaller datasets
+                if len(df) <= 50:  # Only show for smaller datasets to avoid cluttered viz
+                    st.subheader("Mentor-Mentee Network")
+                    
+                    # Create network data
+                    edge_data = []
+                    for _, row in df.iterrows():
+                        mentee_name = row["mentee_name"]
+                        for i in range(1, num_matches + 1):
+                            mentor_col = f"match_{i}_mentor_name"
+                            score_col = f"match_{i}_score"
+                            
+                            if mentor_col in row and score_col in row and pd.notna(row[mentor_col]):
+                                edge_data.append({
+                                    "source": mentee_name,
+                                    "target": row[mentor_col],
+                                    "weight": row[score_col],
+                                    "rank": i
+                                })
+                    
+                    # Using NetworkX and Plotly for visualization
+                    if edge_data:
+                        import networkx as nx
+                        from pyvis.network import Network
+                        
+                        G = nx.Graph()
+                        
+                        # Add edges with weight attribute
+                        for edge in edge_data:
+                            G.add_edge(edge["source"], edge["target"], 
+                                      weight=edge["weight"], 
+                                      rank=edge["rank"])
+                        
+                        # Use Pyvis to create an interactive network visualization
+                        net = Network(notebook=False, height="600px", width="100%", 
+                                      bgcolor="#222222", font_color="white")
+                        
+                        # Add nodes with different colors for mentors and mentees
+                        mentee_names = df["mentee_name"].tolist()
+                        for node in G.nodes():
+                            if node in mentee_names:
+                                net.add_node(node, label=node, color="#FF9999", size=15)
+                            else:
+                                net.add_node(node, label=node, color="#99CCFF", size=20)
+                        
+                        # Add edges
+                        for edge in edge_data:
+                            # Adjust edge width based on score, thicker = higher score
+                            width = max(1, min(10, edge["weight"] * 10))
+                            net.add_edge(edge["source"], edge["target"], 
+                                        width=width, title=f"Score: {edge['weight']:.4f}")
+                        
+                        # Save and display network
+                        net.save_graph("mentor_mentee_network.html")
+                        
+                        with open("mentor_mentee_network.html", "r") as f:
+                            network_html = f.read()
+                        
+                        st.components.v1.html(network_html, height=600)
+                        
+                        # Download button for the network visualization
+                        with open("mentor_mentee_network.html", "rb") as file:
+                            btn = st.download_button(
+                                label="Download Network Visualization",
+                                data=file,
+                                file_name="mentor_mentee_network.html",
+                                mime="text/html"
+                            ) 
+    
+    def display_single_assignment_format(df):
+        # --- NEW: Check if this is the weighted format ---
+        is_weighted_format = 'weighted_semantic_score' in df.columns
+        if is_weighted_format:
+            st.info("Displaying results for weighted semantic score format.")
+        
+        with tab1:
+            st.header("Match Overview")
+            
+            # Summary of match scores for assigned matches only
+            if 'match_score' in df.columns:
+                assigned_df = df.dropna(subset=['assigned_mentor_id'])
+                match_data = [{
+                    "Match Type": "Assigned Match",
+                    "Average Score": assigned_df['match_score'].mean(),
+                    "Min Score": assigned_df['match_score'].min(),
+                    "Max Score": assigned_df['match_score'].max()
+                }]
+                match_summary = pd.DataFrame(match_data)
+                
+                # Create bar chart of average scores
+                fig = px.bar(match_summary, x="Match Type", y="Average Score",
+                             error_y=match_summary["Max Score"]-match_summary["Average Score"],
+                             error_y_minus=match_summary["Average Score"]-match_summary["Min Score"],
+                             title="Match Quality for Assigned Matches",
+                             height=400)
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Display summary table
+                st.dataframe(match_summary, use_container_width=True)
+                
+                # Count of assigned vs unassigned
+                total_mentees = len(df)
+                assigned_count = len(assigned_df)
+                unassigned_count = total_mentees - assigned_count
+                st.subheader(f"Assignment Statistics")
+                st.write(f"- Total Mentees: {total_mentees}")
+                st.write(f"- Assigned Mentees: {assigned_count} ({assigned_count/total_mentees*100:.1f}%)")
+                st.write(f"- Unassigned Mentees: {unassigned_count} ({unassigned_count/total_mentees*100:.1f}%)")
+                
+                # --- NEW: Distribution of Final Match Scores ---
+                st.subheader("Distribution of Final Match Scores (Assigned Mentees)")
+                fig_final_scores = px.histogram(assigned_df, x="match_score",
+                                                  marginal="box", opacity=0.7, nbins=20,
+                                                  title="Distribution of Final Scores for Assigned Matches",
+                                                  height=400)
+                st.plotly_chart(fig_final_scores, use_container_width=True)
+                # --- END NEW ---
+            
+            # Distribution of semantic similarity scores
+            st.subheader("Distribution of Semantic Scores")
+            assigned_df = df.dropna(subset=['assigned_mentor_id'])
+            
+            # Select columns based on format
+            score_cols_to_plot = []
+            if is_weighted_format and 'weighted_semantic_score' in assigned_df.columns:
+                score_cols_to_plot.append('weighted_semantic_score')
+            if is_weighted_format and 'career_similarity' in assigned_df.columns:
+                score_cols_to_plot.append('career_similarity')
+            if is_weighted_format and 'social_similarity' in assigned_df.columns:
+                score_cols_to_plot.append('social_similarity')
+            if not is_weighted_format and 'semantic_similarity' in assigned_df.columns: # Fallback for intermediate format
+                score_cols_to_plot.append('semantic_similarity')
+                
+            if score_cols_to_plot:
+                # Melt the dataframe for plotting multiple distributions
+                melted_df = assigned_df.melt(value_vars=score_cols_to_plot, 
+                                             var_name='Score Type', 
+                                             value_name='Score Value')
+                
+                fig = px.histogram(melted_df, x="Score Value", color="Score Type",
+                                  marginal="box", opacity=0.7, nbins=20,
+                                  title="Distribution of Scores for Assigned Matches",
+                                  height=500)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                 st.write("No relevant score data available for assigned matches.")
+            
+            # --- NEW: Analysis of Match Summary Factors ---
+            st.subheader("Analysis of Match Summary Factors")
+            if 'match_summary' in assigned_df.columns:
+                from collections import Counter
+                
+                factor_counts = Counter()
+                # Define patterns to look for (adjust as needed based on mentmatch.py output)
+                factor_patterns = {
+                    'Semantic_Score': r"^(Weighted Semantic|Semantic similarity):",
+                    'Career_Similarity': r"Career:",
+                    'Social_Similarity': r"Social:",
+                    'Meeting_Cadence': r"Meeting cadence match:",
+                    'Network_Both_Prefer': r"Both prefer same network:",
+                    'Network_One_Prefers': r"One prefers same network:",
+                    'Network_Common': r"Common networks:",
+                    'Competency': r"Competency match:",
+                    'Shared_Hobby': r"Shared hobby:",
+                    'Shared_Movie': r"Shared movie genre:",
+                    'Shared_Book': r"Shared book genre:"
+                }
+                
+                for summary in assigned_df['match_summary'].dropna():
+                    points = summary.split(';')
+                    for point in points:
+                        point_strip = point.strip()
+                        for factor, pattern in factor_patterns.items():
+                            if re.search(pattern, point_strip):
+                                factor_counts[factor] += 1
+                                break # Count only the first matching pattern per point
+                                
+                if factor_counts:
+                    factor_df = pd.DataFrame(factor_counts.items(), columns=['Factor', 'Frequency'])
+                    factor_df = factor_df.sort_values('Frequency', ascending=False)
+                    
+                    fig_factors = px.bar(factor_df, x='Factor', y='Frequency', 
+                                         title="Frequency of Contributing Match Factors",
+                                         height=400)
+                    st.plotly_chart(fig_factors, use_container_width=True)
+                    st.dataframe(factor_df, use_container_width=True)
+                else:
+                    st.write("Could not analyze match summary factors.")
+            else:
+                st.write("Match summary data not available.")
+            
+            # --- NEW: Score Component Correlation ---
+            if is_weighted_format and 'career_similarity' in assigned_df.columns and 'social_similarity' in assigned_df.columns:
+                st.subheader("Career vs. Social Similarity Correlation")
+                fig_corr = px.scatter(assigned_df, x='career_similarity', y='social_similarity',
+                                      color='match_score', 
+                                      hover_name='mentee_name', 
+                                      hover_data=['assigned_mentor_name'],
+                                      title="Career vs. Social Similarity (Colored by Final Score)",
+                                      height=500)
+                st.plotly_chart(fig_corr, use_container_width=True)
+            # --- END NEW ---
+        
+        with tab2:
+            st.header("Detailed Matches")
+            
+            # Mentee selector
+            mentee_names = df["mentee_name"].tolist()
+            selected_mentee = st.selectbox("Select Mentee", mentee_names, key="single_format_mentee_select")
+            
+            # Display match for selected mentee
+            if selected_mentee:
+                mentee_row = df[df["mentee_name"] == selected_mentee].iloc[0]
+                mentee_id = mentee_row["mentee_id"]
+                
+                st.subheader(f"Match for {selected_mentee} (ID: {mentee_id})")
+                
+                # Check if mentee has an assigned mentor
+                if pd.notna(mentee_row.get('assigned_mentor_id')):
+                    # Prepare data for table and chart
+                    match_info = {
+                        "Rank": 1,
+                        "Mentor Name": mentee_row.get('assigned_mentor_name', 'N/A'),
+                        "Mentor ID": mentee_row.get('assigned_mentor_id', 'N/A'),
+                        "Match Score": mentee_row.get('match_score', 0.0),
+                        "Match Summary": mentee_row.get('match_summary', '')
+                    }
+                    scores_for_chart = ["Match Score"]
+                    score_values = [match_info["Match Score"]]
+                    
+                    # Add specific scores based on format
+                    if is_weighted_format:
+                        match_info["Weighted Semantic"] = mentee_row.get('weighted_semantic_score', 0.0)
+                        match_info["Career Similarity"] = mentee_row.get('career_similarity', 0.0)
+                        match_info["Social Similarity"] = mentee_row.get('social_similarity', 0.0)
+                        scores_for_chart.extend(["Weighted Semantic", "Career Similarity", "Social Similarity"])
+                        score_values.extend([match_info["Weighted Semantic"], match_info["Career Similarity"], match_info["Social Similarity"]])
+                    elif 'semantic_similarity' in mentee_row: # Intermediate format
+                         match_info["Semantic Similarity"] = mentee_row.get('semantic_similarity', 0.0)
+                         scores_for_chart.append("Semantic Similarity")
+                         score_values.append(match_info["Semantic Similarity"])
+                    
+                    matches_table_data = [match_info]
+                    matches_table = pd.DataFrame(matches_table_data)
+                    
+                    # Adjust columns displayed in table
+                    display_cols = ["Rank", "Mentor Name", "Mentor ID", "Match Score"] 
+                    if is_weighted_format:
+                         display_cols.extend(["Weighted Semantic", "Career Similarity", "Social Similarity"])
+                    elif "Semantic Similarity" in match_info:
+                         display_cols.append("Semantic Similarity")
+                    display_cols.append("Match Summary")
+                    st.dataframe(matches_table[display_cols], use_container_width=True)
+                    
+                    # Bar chart of match scores (single bar group)
+                    chart_df = pd.DataFrame({
+                        'Score Type': scores_for_chart,
+                        'Score Value': score_values
+                    })
+                    fig = px.bar(chart_df, x="Score Type", y="Score Value", 
+                                 title=f"Match Scores Breakdown for {selected_mentee}",
+                                 height=400)
+                    fig.update_layout(xaxis_title="", yaxis_range=[0,max(score_values)*1.1 if score_values else 1])
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Display match summary in expander
+                    st.subheader("Match Details")
+                    match = matches_table_data[0]
+                    expander_title = f"Assigned Match: {match['Mentor Name']} (Final Score: {match['Match Score']:.4f})"
+                    with st.expander(expander_title):
                         st.write(f"**Mentor ID:** {match['Mentor ID']}")
-                        st.write(f"**Match Score:** {match['Match Score']:.4f}")
-                        st.write(f"**Semantic Similarity:** {match['Semantic Similarity']:.4f}")
-                        st.write("**Match Summary:**")
+                        st.write(f"**Final Match Score:** {match['Match Score']:.4f}")
+                        if is_weighted_format:
+                            st.write(f"**Weighted Semantic Score:** {match['Weighted Semantic']:.4f}")
+                            st.write(f"**Career Similarity:** {match['Career Similarity']:.4f}")
+                            st.write(f"**Social Similarity:** {match['Social Similarity']:.4f}")
+                        elif "Semantic Similarity" in match:
+                             st.write(f"**Semantic Similarity:** {match['Semantic Similarity']:.4f}")
+                        st.write("**Match Factors & Summary:**")
                         
                         # Split the summary by semicolons for better readability
                         summary_points = match['Match Summary'].split(';')
                         for point in summary_points:
                             if point.strip():
                                 st.write(f"- {point.strip()}")
-    
-    with tab3:
-        st.header("Network Analysis")
+                else:
+                    st.warning(f"No mentor assigned to {selected_mentee}.")
         
-        # Extract unique mentors from all matches
-        all_mentors = set()
-        for i in range(1, num_matches + 1):
-            mentor_col = f"match_{i}_mentor_name"
-            if mentor_col in matches_df.columns:
-                mentors = matches_df[mentor_col].dropna().unique()
-                all_mentors.update(mentors)
+        # --- NEW: Mentor Analysis Tab --- 
+        if tab4:
+             with tab4:
+                 st.header("Mentor Analysis")
+                 if df_mentors_orig is not None and 'mentor_capacity_numeric' in df_mentors_orig.columns and 'mentor_id' in df_mentors_orig.columns:
+                     st.subheader("Mentor Capacity Utilization")
+                     
+                     # Calculate assigned counts
+                     assigned_counts = df.dropna(subset=['assigned_mentor_id']).groupby('assigned_mentor_id').size().reset_index(name='assigned_count')
+                     
+                     # Merge with original mentor data (ensure key columns exist and match)
+                     # Use mentor_id if available and reliable
+                     mentor_analysis_df = pd.merge(
+                         df_mentors_orig[['mentor_id', 'mentor_name', 'mentor_capacity_numeric']],
+                         assigned_counts,
+                         left_on='mentor_id', 
+                         right_on='assigned_mentor_id', 
+                         how='left'
+                     )
+                     mentor_analysis_df['assigned_count'] = mentor_analysis_df['assigned_count'].fillna(0).astype(int)
+                     mentor_analysis_df['utilization_%'] = (mentor_analysis_df['assigned_count'] / mentor_analysis_df['mentor_capacity_numeric'] * 100).round(1)
+                     mentor_analysis_df['capacity_diff'] = mentor_analysis_df['mentor_capacity_numeric'] - mentor_analysis_df['assigned_count']
+
+                     # Plot distribution of assigned counts
+                     fig_util = px.histogram(mentor_analysis_df, x='assigned_count',
+                                             title="Distribution of Mentees Assigned per Mentor",
+                                             labels={'assigned_count': 'Number of Mentees Assigned'})
+                     st.plotly_chart(fig_util, use_container_width=True)
+                     
+                     st.dataframe(mentor_analysis_df[['mentor_name', 'mentor_capacity_numeric', 'assigned_count', 'utilization_%', 'capacity_diff']]
+                                      .sort_values('assigned_count', ascending=False), use_container_width=True)
+
+                     st.divider()
+                     
+                     # --- Mentor Detail View ---
+                     st.subheader("Mentor Detail View")
+                     mentor_list = sorted(mentor_analysis_df['mentor_name'].unique())
+                     selected_mentor_name = st.selectbox("Select Mentor:", mentor_list, key="mentor_detail_select")
+                     
+                     if selected_mentor_name:
+                         selected_mentor_id = mentor_analysis_df.loc[mentor_analysis_df['mentor_name'] == selected_mentor_name, 'mentor_id'].iloc[0]
+                         mentor_capacity = mentor_analysis_df.loc[mentor_analysis_df['mentor_name'] == selected_mentor_name, 'mentor_capacity_numeric'].iloc[0]
+                         assigned_to_mentor = df[df['assigned_mentor_id'] == selected_mentor_id].copy()
+                         
+                         st.write(f"**{selected_mentor_name}** (ID: {selected_mentor_id}) - Capacity: {mentor_capacity}")
+                         st.write(f"Assigned Mentees: {len(assigned_to_mentor)}")
+                         
+                         if not assigned_to_mentor.empty:
+                            # Select and rename columns for display
+                            display_cols_mentor = {
+                                'mentee_name': 'Mentee Name',
+                                'mentee_id': 'Mentee ID',
+                                'match_score': 'Match Score'
+                            }
+                            # Add weighted scores if available
+                            if is_weighted_format:
+                                display_cols_mentor.update({
+                                    'weighted_semantic_score': 'Weighted Semantic',
+                                    'career_similarity': 'Career Sim.',
+                                    'social_similarity': 'Social Sim.'
+                                })
+                            elif 'semantic_similarity' in assigned_to_mentor.columns:
+                                display_cols_mentor['semantic_similarity'] = 'Semantic Sim.'
+                                
+                            display_cols_mentor['match_summary'] = 'Match Summary'
+                            
+                            # Filter columns that actually exist in the dataframe
+                            cols_to_show = {k: v for k, v in display_cols_mentor.items() if k in assigned_to_mentor.columns}
+                            
+                            assigned_to_mentor_display = assigned_to_mentor[list(cols_to_show.keys())].rename(columns=cols_to_show)
+                            st.dataframe(assigned_to_mentor_display, use_container_width=True)
+                         else:
+                             st.write("No mentees assigned to this mentor.")
+                     
+                 else:
+                      st.warning("Mentor analysis requires the original mentor data file ('data/mentor_clean_v2.xlsx') with standardized 'mentor_id', 'mentor_name', and cleaned 'mentor_capacity_numeric' columns.")
         
-        st.subheader("Mentor Match Frequency")
-        
-        # Count how many times each mentor appears in the top matches
-        mentor_counts = {}
-        for mentor in all_mentors:
-            count = 0
-            for i in range(1, num_matches + 1):
-                mentor_col = f"match_{i}_mentor_name"
-                if mentor_col in matches_df.columns:
-                    count += (matches_df[mentor_col] == mentor).sum()
-            mentor_counts[mentor] = count
-        
-        # Create a dataframe and sort by count
-        mentor_freq = pd.DataFrame({
-            "Mentor Name": list(mentor_counts.keys()),
-            "Match Count": list(mentor_counts.values())
-        })
-        mentor_freq = mentor_freq.sort_values("Match Count", ascending=False)
-        
-        # Display as horizontal bar chart for better readability with many mentors
-        if len(mentor_freq) > 0:
-            fig = px.bar(mentor_freq.head(20), y="Mentor Name", x="Match Count", 
-                         orientation='h', height=600,
-                         title="Top 20 Mentors by Match Frequency")
-            fig.update_layout(yaxis={'categoryorder':'total ascending'})
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Display full table
-            st.dataframe(mentor_freq, use_container_width=True)
-            
-            # Network diagram option for smaller datasets
-            if len(matches_df) <= 50:  # Only show for smaller datasets to avoid cluttered viz
-                st.subheader("Mentor-Mentee Network")
-                
-                # Create network data
-                edge_data = []
-                for _, row in matches_df.iterrows():
-                    mentee_name = row["mentee_name"]
-                    for i in range(1, num_matches + 1):
-                        mentor_col = f"match_{i}_mentor_name"
-                        score_col = f"match_{i}_score"
+        # --- NEW: Attribute Analysis Tab ---
+        if tab5:
+            with tab5:
+                st.header("Attribute Analysis")
+                if df_mentees_orig is not None and df_mentors_orig is not None:
+                    
+                    # Prepare merged data for analysis
+                    assigned_df_merged = None
+                    try:
+                        assigned_df = df.dropna(subset=['assigned_mentor_id']).copy()
                         
-                        if mentor_col in row and score_col in row and pd.notna(row[mentor_col]):
+                        # --- Remove Debugging Prints ---
+                        # st.write("Columns in assigned_df (from match results):", assigned_df.columns.tolist())
+                        # if df_mentees_orig is not None:
+                        #     st.write("Columns in df_mentees_orig (before prefix):", df_mentees_orig.columns.tolist())
+                        # else:
+                        #     st.write("df_mentees_orig is None")
+                        # --- END Remove ---
+                        
+                        # Merge assigned matches with mentee data (using left_on/right_on)
+                        assigned_df_merged_mentee = pd.merge(
+                            assigned_df,
+                            df_mentees_orig.add_prefix('mentee_'), # Add prefix to avoid column name clashes
+                            left_on='mentee_id', 
+                            right_on='mentee_mentee_id', # Use prefixed column name
+                            how='left'
+                        )
+                        # Merge with mentor data (using left_on/right_on)
+                        assigned_df_merged = pd.merge(
+                            assigned_df_merged_mentee,
+                            df_mentors_orig.add_prefix('mentor_'), # Add prefix
+                            left_on='assigned_mentor_id', # Use ID from assigned_df
+                            right_on='mentor_mentor_id', # Use prefixed column name
+                            how='left'
+                        )
+                        st.info("Successfully merged match data with original mentee and mentor data.")
+                    except Exception as merge_error:
+                        st.error(f"Failed to merge data for attribute analysis: {merge_error}")
+                        assigned_df_merged = None # Prevent further analysis if merge fails
+                    
+                    if assigned_df_merged is not None:
+                        # --- Match Score Distribution by Attributes ---
+                        st.subheader("Match Score Distribution by Key Attributes")
+                        attributes_to_plot = {
+                            'mentee_level': 'Mentee Level',
+                            'mentee_category': 'Mentee Category',
+                            'mentor_level': 'Mentor Level',
+                            'mentor_category': 'Mentor Category',
+                            'mentee_years_with_amentum_numeric': 'Mentee Years with Company'
+                            # Add more attributes if needed and available
+                        }
+                        
+                        selected_attribute = st.selectbox(
+                            "Group match scores by attribute:", 
+                            options=list(attributes_to_plot.keys()), 
+                            format_func=lambda x: attributes_to_plot[x], # Show user-friendly names
+                            key="attr_dist_select"
+                        )
+                        
+                        if selected_attribute and selected_attribute in assigned_df_merged.columns:
+                            # Handle potential NaN values in attribute column gracefully for plotting
+                            plot_df = assigned_df_merged.dropna(subset=[selected_attribute, 'match_score']).copy()
+                            if not plot_df.empty:
+                                fig_attr_dist = px.box(plot_df, x=selected_attribute, y='match_score',
+                                                    title=f"Match Score Distribution by {attributes_to_plot[selected_attribute]}",
+                                                    labels={'match_score': 'Match Score', selected_attribute: attributes_to_plot[selected_attribute]},
+                                                    points="outliers", height=500)
+                                st.plotly_chart(fig_attr_dist, use_container_width=True)
+                            else:
+                                st.write(f"No valid data to plot for attribute '{attributes_to_plot[selected_attribute]}'.")
+                        else:
+                            st.write("Select an attribute or attribute data missing.")
+                            
+                        st.divider()
+
+                        # --- Cross-Functional Matching Heatmap ---
+                        st.subheader("Cross-Functional Matching (Mentee vs Mentor Category)")
+                        # Use prefixed column names
+                        mentee_cat_col = 'mentee_mentee_category' 
+                        mentor_cat_col = 'mentor_mentor_category'
+                        if mentee_cat_col in assigned_df_merged.columns and mentor_cat_col in assigned_df_merged.columns:
+                            try:
+                                crosstab = pd.crosstab(assigned_df_merged[mentee_cat_col], assigned_df_merged[mentor_cat_col])
+                                if not crosstab.empty:
+                                    fig_heatmap = px.imshow(crosstab, text_auto=True, aspect="auto",
+                                                         title="Heatmap of Matches: Mentee Category vs. Mentor Category",
+                                                         labels=dict(x="Mentor Category", y="Mentee Category", color="Count"), # Add labels
+                                                         height=600)
+                                    st.plotly_chart(fig_heatmap, use_container_width=True)
+                                else:
+                                     st.write("No cross-functional match data available (categories might be missing).")
+                            except Exception as heat_err:
+                                st.error(f"Error creating heatmap: {heat_err}")
+                        else:
+                             st.write("Mentee or Mentor category information missing for heatmap.")
+                             
+                        st.divider()
+
+                        # --- Unassigned Mentee Attribute Analysis ---
+                        st.subheader("Comparison of Assigned vs. Unassigned Mentees")
+                        unassigned_mentee_ids = set(df_mentees_orig['mentee_id']) - set(assigned_df_merged['mentee_id'])
+                        df_unassigned_orig = df_mentees_orig[df_mentees_orig['mentee_id'].isin(unassigned_mentee_ids)].copy()
+                        
+                        # Create combined dataframe with status
+                        assigned_df_merged['Assignment Status'] = 'Assigned'
+                        df_unassigned_orig['Assignment Status'] = 'Unassigned'
+                        
+                        # Combine relevant columns (make sure they exist in both)
+                        # Find common base attributes, checking prefixed vs unprefixed
+                        potential_compare_attributes = ['level', 'category', 'years_with_amentum_numeric'] # Base names
+                        common_attributes_for_compare = []
+                        for base_attr in potential_compare_attributes:
+                            unprefixed_mentee_col = f'mentee_{base_attr}'
+                            prefixed_mentee_col = f'mentee_{unprefixed_mentee_col}'
+                            if unprefixed_mentee_col in df_unassigned_orig.columns and prefixed_mentee_col in assigned_df_merged.columns:
+                                common_attributes_for_compare.append(base_attr)
+                                
+                        if common_attributes_for_compare:
+                             # Prepare dataframes for concat - select only ID, status, and the common attribute
+                            combined_list = []
+                            for base_attr in common_attributes_for_compare:
+                                unprefixed_mentee_col = f'mentee_{base_attr}'
+                                prefixed_mentee_col = f'mentee_{unprefixed_mentee_col}'
+                                
+                                # Select and rename for consistency before concat
+                                df1 = assigned_df_merged[['mentee_id', 'Assignment Status', prefixed_mentee_col]].rename(
+                                    columns={prefixed_mentee_col: base_attr}
+                                )
+                                df2 = df_unassigned_orig[['mentee_id', 'Assignment Status', unprefixed_mentee_col]].rename(
+                                    columns={unprefixed_mentee_col: base_attr}
+                                )
+                                combined_list.append(pd.concat([df1, df2], ignore_index=True))
+                            
+                            # For simplicity, let's analyze one attribute at a time via selectbox
+                            # We need a mapping from base_attr to the combined dataframe containing it
+                            combined_dfs_map = {base_attr: df for base_attr, df in zip(common_attributes_for_compare, combined_list)}
+                            
+                            selected_compare_base_attribute = st.selectbox(
+                                "Compare attribute distribution for assigned vs. unassigned mentees:", 
+                                options=common_attributes_for_compare, # Use base names for selection
+                                format_func=lambda x: x.replace('_', ' ').title(), # Make labels friendlier
+                                key="unassigned_attr_select"
+                            )
+                            
+                            if selected_compare_base_attribute:
+                                plot_df_compare = combined_dfs_map[selected_compare_base_attribute]
+                                fig_compare_dist = px.histogram(plot_df_compare.dropna(subset=[selected_compare_base_attribute]), 
+                                                              x=selected_compare_base_attribute, # Use base name now
+                                                              color='Assignment Status',
+                                                              barmode='overlay', marginal='box',
+                                                              title=f"Distribution of {selected_compare_base_attribute.replace('_',' ').title()} for Assigned vs. Unassigned Mentees",
+                                                              labels={selected_compare_base_attribute: selected_compare_base_attribute.replace('_',' ').title()},
+                                                              height=500)
+                                st.plotly_chart(fig_compare_dist, use_container_width=True)
+                        else:
+                            st.write("No common attributes (level, category, years) found between assigned and unassigned mentee data for comparison.")
+                            
+                    else:
+                        st.error("Attribute analysis cannot proceed due to data merging issues.")
+                else:
+                     st.warning("Attribute analysis requires both original mentee and mentor data files ('data/mentee_clean.xlsx', 'data/mentor_clean_v2.xlsx') with standardized columns.")
+        
+        with tab3:
+            st.header("Network Analysis")
+            
+            # Extract unique mentors from assigned matches
+            all_mentors = set()
+            if 'assigned_mentor_name' in df.columns:
+                mentors = df['assigned_mentor_name'].dropna().unique()
+                all_mentors.update(mentors)
+            
+            st.subheader("Mentor Assignment Frequency")
+            
+            # Count how many times each mentor appears in assignments
+            mentor_counts = {}
+            for mentor in all_mentors:
+                count = (df['assigned_mentor_name'] == mentor).sum()
+                mentor_counts[mentor] = count
+            
+            # Create a dataframe and sort by count
+            mentor_freq = pd.DataFrame({
+                "Mentor Name": list(mentor_counts.keys()),
+                "Assignment Count": list(mentor_counts.values())
+            })
+            mentor_freq = mentor_freq.sort_values("Assignment Count", ascending=False)
+            
+            # Display as horizontal bar chart for better readability with many mentors
+            if len(mentor_freq) > 0:
+                fig = px.bar(mentor_freq.head(20), y="Mentor Name", x="Assignment Count", 
+                             orientation='h', height=600,
+                             title="Top 20 Mentors by Assignment Frequency")
+                fig.update_layout(yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Display full table
+                st.dataframe(mentor_freq, use_container_width=True)
+                
+                # Network diagram option for smaller datasets
+                if len(df) <= 50:  # Only show for smaller datasets to avoid cluttered viz
+                    st.subheader("Mentor-Mentee Network")
+                    
+                    # Create network data for assigned matches
+                    edge_data = []
+                    assigned_df = df.dropna(subset=['assigned_mentor_id'])
+                    for _, row in assigned_df.iterrows():
+                        mentee_name = row["mentee_name"]
+                        if pd.notna(row['assigned_mentor_name']):
                             edge_data.append({
                                 "source": mentee_name,
-                                "target": row[mentor_col],
-                                "weight": row[score_col],
-                                "rank": i
+                                "target": row['assigned_mentor_name'],
+                                "weight": row.get('match_score', 0.0),
+                                "rank": 1
                             })
-                
-                # Using NetworkX and Plotly for visualization
-                if edge_data:
-                    import networkx as nx
-                    from pyvis.network import Network
                     
-                    G = nx.Graph()
-                    
-                    # Add edges with weight attribute
-                    for edge in edge_data:
-                        G.add_edge(edge["source"], edge["target"], 
-                                  weight=edge["weight"], 
-                                  rank=edge["rank"])
-                    
-                    # Use Pyvis to create an interactive network visualization
-                    net = Network(notebook=False, height="600px", width="100%", 
-                                  bgcolor="#222222", font_color="white")
-                    
-                    # Add nodes with different colors for mentors and mentees
-                    for node in G.nodes():
-                        if node in mentee_names:
-                            net.add_node(node, label=node, color="#FF9999", size=15)
-                        else:
-                            net.add_node(node, label=node, color="#99CCFF", size=20)
-                    
-                    # Add edges
-                    for edge in edge_data:
-                        # Adjust edge width based on score, thicker = higher score
-                        width = max(1, min(10, edge["weight"] * 10))
-                        net.add_edge(edge["source"], edge["target"], 
-                                    width=width, title=f"Score: {edge['weight']:.4f}")
-                    
-                    # Save and display network
-                    net.save_graph("mentor_mentee_network.html")
-                    
-                    with open("mentor_mentee_network.html", "r") as f:
-                        network_html = f.read()
-                    
-                    st.components.v1.html(network_html, height=600)
-                    
-                    # Download button for the network visualization
-                    with open("mentor_mentee_network.html", "rb") as file:
-                        btn = st.download_button(
-                            label="Download Network Visualization",
-                            data=file,
-                            file_name="mentor_mentee_network.html",
-                            mime="text/html"
-                        ) 
+                    # Using NetworkX and Plotly for visualization
+                    if edge_data:
+                        import networkx as nx
+                        from pyvis.network import Network
+                        
+                        G = nx.Graph()
+                        
+                        # Add edges with weight attribute
+                        for edge in edge_data:
+                            G.add_edge(edge["source"], edge["target"], 
+                                      weight=edge["weight"], 
+                                      rank=edge["rank"])
+                        
+                        # Use Pyvis to create an interactive network visualization
+                        net = Network(notebook=False, height="600px", width="100%", 
+                                      bgcolor="#222222", font_color="white")
+                        
+                        # Add nodes with different colors for mentors and mentees
+                        mentee_names = df["mentee_name"].tolist()
+                        for node in G.nodes():
+                            if node in mentee_names:
+                                net.add_node(node, label=node, color="#FF9999", size=15)
+                            else:
+                                net.add_node(node, label=node, color="#99CCFF", size=20)
+                        
+                        # Add edges
+                        for edge in edge_data:
+                            # Adjust edge width based on score, thicker = higher score
+                            width = max(1, min(10, edge["weight"] * 10))
+                            net.add_edge(edge["source"], edge["target"], 
+                                        width=width, title=f"Score: {edge['weight']:.4f}")
+                        
+                        # Save and display network
+                        net.save_graph("mentor_mentee_network.html")
+                        
+                        with open("mentor_mentee_network.html", "r") as f:
+                            network_html = f.read()
+                        
+                        st.components.v1.html(network_html, height=600)
+                        
+                        # Download button for the network visualization
+                        with open("mentor_mentee_network.html", "rb") as file:
+                            btn = st.download_button(
+                                label="Download Network Visualization",
+                                data=file,
+                                file_name="mentor_mentee_network.html",
+                                mime="text/html"
+                            ) 
+                    else:
+                        st.write("No assigned matches to display in the network.")
+                else:
+                    st.write("Network visualization is disabled for datasets larger than 50 mentees to avoid clutter.")
+            else:
+                st.write("No mentor assignment data available.")
+    
+    # Call the appropriate display function based on format
+    if is_new_format:
+        display_single_assignment_format(matches_df)
+    else:
+        display_multi_match_format(matches_df, num_matches) 
