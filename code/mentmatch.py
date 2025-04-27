@@ -3,37 +3,14 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
 import re # For cleaning text
-import argparse
 
 # --- Configuration ---
-MENTEE_FILE_PATH = None
-MENTOR_FILE_PATH = None
-OUTPUT_FILE_PATH = None
-
-# --- Argument Parser ---
-def parse_arguments():
-    parser = argparse.ArgumentParser(description="Match mentees and mentors based on semantic similarity.")
-    parser.add_argument(
-        '--mentee_file',
-        type=str,
-        default='./data/mentee_clean.xlsx',
-        help='Path to the mentee input Excel file.'
-    )
-    parser.add_argument(
-        '--mentor_file',
-        type=str,
-        default='./data/mentor_clean.xlsx',
-        help='Path to the mentor input Excel file.'
-    )
-    parser.add_argument(
-        '--output_file',
-        type=str,
-        default='mentor_mentee_matches.xlsx',
-        help='Path to save the output matches Excel file.'
-    )
-    return parser.parse_args()
+MENTEE_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/data/mentee_clean.xlsx' # <--- !!! UPDATE THIS PATH !!!
+MENTOR_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/data/mentor_clean_v2.xlsx' # <--- !!! UPDATE THIS PATH !!!
+OUTPUT_FILE_PATH = '/datadrive/part1/sandbox/mentmatch/mentor_mentee_matches_20250415.xlsx' # Path to save the results
 
 # Define the TARGET standardized column names we expect to use after renaming
+# These correspond to the values in the .rename() dictionary keys used for semantic profiles
 MENTEE_TARGET_SEMANTIC_COLS = [
     'competencies_desired',
     'reason_for_participating',
@@ -101,7 +78,7 @@ def standardize_col_names(df):
         'in_which_time_zone_do_you_work_currently': 'time_zone',
         'how_many_years_have_you_been_with_amentum': 'years_with_amentum',
         # Use the exact name from Mentor's "initial standardization" printout
-        'as_a_mentor_please_select_the_competencies_you_feel_you_could_teach': 'competencies_offered',
+        'as_a_mentor_you_will_be_helping_a_mentee_develop_core_competencies_that_will_enable_them_to_become_future_leaders_within_the_organization_please_select_the_competencies_you_feel_you_could_teach_': 'competencies_offered', # Adjusted based on user output
         'how_many_mentees_are_you_able_to_mentor_throughout_the_program': 'mentor_capacity',
         'what_amentum_connect_networks_are_you_a_member_of': 'amentum_connection_networks',
          # Handle specific mentor variation if different from mentee's standardized name
@@ -138,12 +115,6 @@ def standardize_col_names(df):
     return df
 
 # --- Main Script ---
-
-# 0. Parse Arguments
-args = parse_arguments()
-MENTEE_FILE_PATH = args.mentee_file
-MENTOR_FILE_PATH = args.mentor_file
-OUTPUT_FILE_PATH = args.output_file
 
 # 1. Load Data
 print("Loading data...")
@@ -188,7 +159,7 @@ df_mentees['semantic_profile'] = df_mentees.apply(lambda row: combine_text_field
 df_mentors['semantic_profile'] = df_mentors.apply(lambda row: combine_text_fields(row, MENTOR_TARGET_SEMANTIC_COLS), axis=1)
 
 
-# --- Data Cleaning for Mentor Capacity --- <<<< NEW/MODIFIED SECTION
+# --- Data Cleaning for Mentor Capacity ---
 print("\nCleaning mentor capacity data...")
 if 'mentor_capacity' in df_mentors.columns:
     # Define mapping for common text numbers (add more if needed)
@@ -267,6 +238,9 @@ mentor_cadence = df_mentors.get('meeting_cadence', default_series_mentor).tolist
 mentor_networks = df_mentors.get('amentum_connection_networks', default_series_mentor).tolist()
 mentor_prefer_same_network = df_mentors.get('prefer_same_network_mentor', default_series_mentor).tolist()
 
+# Store additional data for match summary
+mentor_df_index = {id: idx for idx, id in enumerate(mentor_ids)}
+
 
 for i, mentee in df_mentees.iterrows():
     mentee_id = mentee['id']
@@ -285,6 +259,10 @@ for i, mentee in df_mentees.iterrows():
 
         # --- Apply Matching Constraints and Preferences ---
         final_score = score
+        match_reasons = []
+        match_reasons.append(f"Semantic similarity: {score:.2f}")
+
+        # Skip if mentor capacity is exhausted or mentor is mentee's manager
         if mentor_cap <= 0: continue
         if pd.notna(mentee_manager) and isinstance(mentor_name, str) and mentor_name == mentee_manager: continue
 
@@ -292,6 +270,7 @@ for i, mentee in df_mentees.iterrows():
         mentor_cad = mentor_cadence[j]
         if pd.notna(mentee_cadence) and pd.notna(mentor_cad) and mentee_cadence == mentor_cad:
             final_score += 0.1
+            match_reasons.append(f"Meeting cadence match: {mentor_cad}")
 
         # Network Preference
         mentee_nets_str = str(mentee_networks) if pd.notna(mentee_networks) else ''
@@ -302,12 +281,35 @@ for i, mentee in df_mentees.iterrows():
         mentee_pref = str(mentee_prefer_same_network).lower() == 'yes'
         mentor_pref = str(mentor_prefer_same_network[j]).lower() == 'yes'
         if common_nets:
-            if mentee_pref and mentor_pref: final_score += 0.15
-            elif mentee_pref or mentor_pref: final_score += 0.05
+            if mentee_pref and mentor_pref:
+                final_score += 0.15
+                match_reasons.append(f"Both prefer same network: {', '.join(common_nets)}")
+            elif mentee_pref or mentor_pref:
+                final_score += 0.05
+                match_reasons.append(f"One prefers same network: {', '.join(common_nets)}")
+            else:
+                match_reasons.append(f"Common networks: {', '.join(common_nets)}")
+
+        # Competency match (add to summary)
+        mentee_competencies = str(mentee.get('competencies_desired', ''))
+        mentor_competencies = str(df_mentors.iloc[j].get('competencies_offered', ''))
+        if mentee_competencies and mentor_competencies:
+            match_reasons.append(f"Competency match: mentee seeks {mentee_competencies.strip()}, mentor offers {mentor_competencies.strip()}")
+
+        # Other match factors - add shared interests
+        for interest_field in ['hobby', 'movie_genre', 'book_genre']:
+            mentee_interest = str(mentee.get(interest_field, ''))
+            mentor_interest = str(df_mentors.iloc[j].get(interest_field, ''))
+            if mentee_interest and mentor_interest and mentee_interest.lower() == mentor_interest.lower():
+                match_reasons.append(f"Shared {interest_field.replace('_', ' ')}: {mentee_interest}")
+
+        # Create a concise match summary
+        match_summary = "; ".join(match_reasons)
 
         mentor_scores.append({
             'mentor_id': mentor_id, 'mentor_name': mentor_name,
-            'semantic_similarity': score, 'final_score': final_score
+            'semantic_similarity': score, 'final_score': final_score,
+            'match_summary': match_summary
         })
 
     # Sort and store top N matches
@@ -320,19 +322,27 @@ for i, mentee in df_mentees.iterrows():
         mentee_matches[f'match_{k+1}_mentor_name'] = match['mentor_name']
         mentee_matches[f'match_{k+1}_score'] = round(match['final_score'], 4)
         mentee_matches[f'match_{k+1}_semantic_similarity'] = round(match['semantic_similarity'], 4)
+        mentee_matches[f'match_{k+1}_summary'] = match['match_summary']
     all_matches.append(mentee_matches)
 
 # 5. Output Results
-print(f"\nSaving results to {OUTPUT_FILE_PATH}...")
+print("\nSaving results...")
+df_results = pd.DataFrame(all_matches)
+cols_order = ['mentee_id', 'mentee_name']
+for k in range(1, top_n + 1):
+    if f'match_{k}_mentor_id' in df_results.columns:
+        cols_order.extend([
+            f'match_{k}_mentor_id',
+            f'match_{k}_mentor_name',
+            f'match_{k}_score',
+            f'match_{k}_semantic_similarity',
+            f'match_{k}_summary'
+        ])
+df_results = df_results[[col for col in cols_order if col in df_results.columns]]
+
 try:
-    df_results = pd.DataFrame(all_matches)
-    cols_order = ['mentee_id', 'mentee_name']
-    for k in range(1, top_n + 1):
-        if f'match_{k}_mentor_id' in df_results.columns:
-            cols_order.extend([f'match_{k}_mentor_id', f'match_{k}_mentor_name', f'match_{k}_score', f'match_{k}_semantic_similarity'])
-    df_results = df_results[[col for col in cols_order if col in df_results.columns]]
     df_results.to_excel(OUTPUT_FILE_PATH, index=False)
-    print(f"Successfully saved matches to {OUTPUT_FILE_PATH}")
+    print(f"Matching suggestions saved to '{OUTPUT_FILE_PATH}'")
 except Exception as e:
     print(f"Error saving results to Excel: {e}")
 
